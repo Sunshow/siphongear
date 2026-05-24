@@ -1,0 +1,30 @@
+services:
+  siphongear:
+    image: sunshow/siphongear:latest
+    container_name: siphongear
+    ports:
+      - "7080:7080"
+    environment:
+      SIPHON_SERVER__HOST: 0.0.0.0
+      SIPHON_SERVER__PORT: "7080"
+      SIPHON_DATABASE__DRIVER: sqlite
+      SIPHON_DATABASE__DSN: /app/data/siphongear.db
+      SIPHON_LOG__LEVEL: info
+      SIPHON_LOG__PRETTY: "false"
+      SIPHON_RUNNER__MAX_CONCURRENCY: "4"
+      SIPHON_RUNNER__DEFAULT_TIMEOUT: "60"
+      SIPHON_AUTH__MASTER_KEY: ${SIPHON_AUTH__MASTER_KEY:?set in .env, 32+ bytes for AES-GCM}
+      SIPHON_AUTH__JWT_SECRET: ${SIPHON_AUTH__JWT_SECRET:?set in .env, 32+ bytes for JWT}
+      SIPHON_AUTH__INIT_USERNAME: ${SIPHON_AUTH__INIT_USERNAME:-admin}
+      SIPHON_AUTH__INIT_PASSWORD: ${SIPHON_AUTH__INIT_PASSWORD:-admin}
+      SIPHON_AUTH__TOKEN_TTL_HRS: "168"
+      SIPHON_BROWSER__WS_URL: ${SIPHON_BROWSER__WS_URL:-}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:7080/api/v1/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
