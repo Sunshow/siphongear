@@ -63,13 +63,67 @@ cd web && npm install && npm run dev
 
 ### Docker
 
+Build locally:
+
 ```bash
 docker build -t siphongear .
 docker run -p 7080:7080 \
   -e SIPHON_AUTH__MASTER_KEY=$(openssl rand -hex 32) \
   -e SIPHON_AUTH__JWT_SECRET=$(openssl rand -hex 32) \
-  -v $(pwd)/data:/app/data \
+  -v siphongear-data:/app/data \
   siphongear
+```
+
+Or pull the published image (`sunshow/siphongear:latest`):
+
+```bash
+docker pull sunshow/siphongear:latest
+docker run -d --name siphongear -p 7080:7080 \
+  -e SIPHON_AUTH__MASTER_KEY=$(openssl rand -hex 32) \
+  -e SIPHON_AUTH__JWT_SECRET=$(openssl rand -hex 32) \
+  -v siphongear-data:/app/data \
+  sunshow/siphongear:latest
+```
+
+The container runs as non-root user `siphon` (uid 1000); the SQLite DB lives in `/app/data` (declared `VOLUME`).
+
+### Docker Compose
+
+A ready-to-use `docker-compose.yaml` is included; it pulls `sunshow/siphongear:latest` and persists data into a named volume:
+
+```bash
+cp .env.example .env
+# edit .env — set SIPHON_AUTH__MASTER_KEY and SIPHON_AUTH__JWT_SECRET to long random strings
+docker compose pull
+docker compose up -d
+docker compose logs -f siphongear
+```
+
+The compose file uses `${VAR:?...}` for the two required secrets, so `compose up` fails fast if they're not set in `.env`.
+
+#### Persisting data: named volume vs bind mount
+
+By default `docker-compose.yaml` uses a **named volume** (`siphongear-data`). This is the painless path because Docker initializes the volume with the container's existing `/app/data` ownership (uid 1000 `siphon`), so writes just work.
+
+If you want to bind-mount a host directory instead (e.g. for direct backup/inspection), edit the `volumes:` section in `docker-compose.yaml` and **chown the host dir to uid 1000 first**:
+
+```bash
+mkdir -p ./data
+sudo chown -R 1000:1000 ./data
+```
+
+Otherwise the container will fail with this misleading SQLite error:
+
+```
+{"level":"error","error":"unable to open database file: out of memory (14)","message":"open db"}
+```
+
+That `out of memory` text is `SQLITE_CANTOPEN` (error code 14) — the real cause is the host directory being owned by your local user (`sunshow:staff` mode 0755), so uid 1000 inside the container can't create the WAL/SHM files. Either chown the dir to 1000 or stick with the named volume.
+
+Reset everything (including the DB):
+
+```bash
+docker compose down -v
 ```
 
 ## Configuration
@@ -222,7 +276,10 @@ siphongear/
 ├── pkg/logger/                 zerolog wrapper
 ├── web/                        Vue 3 SPA, embedded via go:embed
 ├── config.yaml.example
+├── .env.example
 ├── Dockerfile
+├── docker-compose.yaml
+├── Jenkinsfile
 └── Makefile
 ```
 

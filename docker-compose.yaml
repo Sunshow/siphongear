@@ -20,7 +20,11 @@ services:
       SIPHON_AUTH__TOKEN_TTL_HRS: "168"
       SIPHON_BROWSER__WS_URL: ${SIPHON_BROWSER__WS_URL:-}
     volumes:
-      - ./data:/app/data
+      - siphongear-data:/app/data
+      # 想直接绑宿主目录的话，注释上面这行并启用下面这行，
+      # 同时把宿主目录 chown 到容器内 uid 1000:
+      #   mkdir -p ./data && sudo chown -R 1000:1000 ./data
+      # - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:7080/api/v1/healthz"]
@@ -28,3 +32,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  siphongear-data:
