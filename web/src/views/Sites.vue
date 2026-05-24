@@ -23,6 +23,9 @@ function openEdit(row: any) {
 }
 
 async function save() {
+  if (typeof form.base_url === 'string') {
+    form.base_url = form.base_url.trim().replace(/\/+$/, '')
+  }
   if (form.id) await api.sites.update(form.id, form)
   else await api.sites.create(form)
   dialog.value = false

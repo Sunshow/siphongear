@@ -145,6 +145,10 @@ async function dryRun() {
 
 async function applyTemplate(payload: { template: any; vars: Record<string, string>; credentialId: number; name: string; siteId: number }) {
   const tpl = payload.template
+  const vars: Record<string, string> = { ...payload.vars }
+  if (typeof vars.base_url === 'string') {
+    vars.base_url = vars.base_url.trim().replace(/\/+$/, '')
+  }
   const cloned = JSON.parse(JSON.stringify(tpl.pipeline)) as { steps: any[]; indicators: any[] }
   for (const step of cloned.steps) {
     if (step.kind === 'input.credential' && step.config) {
@@ -154,10 +158,10 @@ async function applyTemplate(payload: { template: any; vars: Record<string, stri
       for (const k of Object.keys(step.config)) {
         const v = step.config[k]
         if (typeof v === 'string') {
-          step.config[k] = substituteVars(v, payload.vars)
+          step.config[k] = substituteVars(v, vars)
         } else if (v && typeof v === 'object' && !Array.isArray(v)) {
           for (const kk of Object.keys(v)) {
-            if (typeof v[kk] === 'string') v[kk] = substituteVars(v[kk], payload.vars)
+            if (typeof v[kk] === 'string') v[kk] = substituteVars(v[kk], vars)
           }
         }
       }

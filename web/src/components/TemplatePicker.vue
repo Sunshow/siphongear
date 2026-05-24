@@ -167,7 +167,8 @@ async function ensureSite(): Promise<number | null> {
     return null
   }
   try {
-    const created = await api.sites.create({ name: newSite.name.trim(), base_url: newSite.base_url.trim() })
+    const baseURL = newSite.base_url.trim().replace(/\/+$/, '')
+    const created = await api.sites.create({ name: newSite.name.trim(), base_url: baseURL })
     ElMessage.success(`新 Site #${created.id} 已创建`)
     sites.value = await api.sites.list()
     currentSiteId.value = created.id
