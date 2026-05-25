@@ -2,6 +2,18 @@
 
 A configuration-driven web data collector with a pluggable `Input → Fetch → Transform → Parse → Extract` pipeline. Originally built to track recharge balances across multiple sites, generalized into a tool for any periodic web collection task. Single Go binary with embedded Vue 3 + Element Plus UI.
 
+## 中文简介
+
+SiphonGear 是一个**配置驱动的通用采集与指标平台**。最初目标是定时查询多个网站的充值余额，已泛化为可扩展的 Web 爬虫/采集工具：
+
+- 每个采集任务（Collector）由一条 `Input → Fetch → Transform → Parse → Extract` 流水线组成，每个环节都是可插拔的 Step。
+- Web 界面（Vue 3 + Element Plus）配置任务、调度、指标，所有结果落库形成时间序列。
+- 调度支持固定间隔 / cron 表达式 / 事件链式触发三种模式。
+- 内置任务模板，"From Template" 一键创建 Site + Credential + Collector + Pipeline + Indicators。
+- 凭证 AES-GCM 加密存储；JWT 单用户登录。
+- 默认 SQLite（纯 Go 驱动，无 cgo），也支持 MySQL / Postgres。
+- 单二进制（Go + go:embed 打包前端），部署友好。
+
 ## Features
 
 - Pluggable pipeline with 15 built-in steps (HTTP, headless browser, JSONPath, CSS selectors, regex, JS scripting via goja, more)
@@ -195,7 +207,19 @@ Step `config` fields are exposed by `GET /api/v1/registry/steps`. The frontend's
 
 ## Templates
 
-Templates pre-fill an entire Collector setup. The included `sub2api-balance` works for any sub2api / OneAPI / NewAPI-style gateway. From the **New Collector** screen, click **From Template**, pick the template, fill base URL + email/password, click Apply — Site, Credential, Collector, Pipeline, and Indicators are all created in one click.
+Templates pre-fill an entire Collector setup. From the **New Collector** screen, click **From Template**, pick the template, fill the prompted variables and credential fields, click Apply — Site, Credential, Collector, Pipeline, and Indicators are all created in one click.
+
+### 内置模板（Built-in Templates）
+
+| 名称 | 说明 |
+|---|---|
+| `sub2api-balance` | sub2api 风格网关：邮箱+密码登录后取账户余额 |
+| `newapi-balance` | NewAPI（[QuantumNous/new-api](https://github.com/QuantumNous/new-api)）：用户名+密码 cookie session，折算成 USD 余额与已用 |
+| `newapi-balance-accesstoken` | NewAPI：使用「系统访问令牌」+ user_id 免登录直取，折算成 USD 余额与已用 |
+
+> 模板源码位于 `internal/templates/builtin.go`，运行时也可通过 `GET /api/v1/templates` 获取完整定义。
+
+### 添加新模板
 
 To register a new template, edit `internal/templates/builtin.go`:
 

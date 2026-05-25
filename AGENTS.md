@@ -97,7 +97,7 @@ rm -rf data/      # 整个 SQLite + 历史
 ## 测试
 
 - `internal/pipeline/engine_test.go`：端到端跑 static + jsonpath 两条用例
-- 实际接口验证可以通过任意 sub2api / OneAPI / NewAPI 风格的网关复现 `sub2api-balance` 模板
+- 实际接口验证可以通过任意 sub2api 风格的网关复现 `sub2api-balance` 模板
 
 ## 已知限制
 
