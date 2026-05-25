@@ -9,6 +9,7 @@ interface Card {
   collector_name: string
   site_id: number
   site_name: string
+  site_base_url: string
   indicator_id: number
   key: string
   name: string
@@ -119,10 +120,11 @@ function gotoEdit(card: Card) {
 }
 
 const groupedBySite = computed(() => {
-  const groups: Record<string, { siteId: number; siteName: string; cards: Card[] }> = {}
+  const groups: Record<string, { siteId: number; siteName: string; baseUrl: string; cards: Card[] }> = {}
   for (const c of cards.value) {
     const key = c.site_name || `Site #${c.site_id || 0}`
-    if (!groups[key]) groups[key] = { siteId: c.site_id, siteName: key, cards: [] }
+    if (!groups[key]) groups[key] = { siteId: c.site_id, siteName: key, baseUrl: c.site_base_url || '', cards: [] }
+    else if (!groups[key].baseUrl && c.site_base_url) groups[key].baseUrl = c.site_base_url
     groups[key].cards.push(c)
   }
   return Object.values(groups).sort((a, b) => a.siteName.localeCompare(b.siteName))
@@ -155,7 +157,16 @@ onMounted(reload)
         <div class="site-card" :style="{ '--accent': siteAccent(group.siteId) } as any">
           <div class="site-header">
             <span class="site-dot"></span>
-            <span class="site-name">{{ group.siteName }}</span>
+            <a
+              v-if="group.baseUrl"
+              class="site-name site-link"
+              :href="group.baseUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              :title="group.baseUrl"
+              @click.stop
+            >{{ group.siteName }}</a>
+            <span v-else class="site-name">{{ group.siteName }}</span>
             <span class="site-count">{{ group.cards.length }}</span>
           </div>
 
@@ -246,6 +257,15 @@ onMounted(reload)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.site-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.site-link:hover {
+  color: var(--accent, #6366f1);
+  text-decoration: underline;
 }
 .site-count {
   font-size: 12px;

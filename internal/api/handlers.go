@@ -499,6 +499,7 @@ type dashboardCard struct {
 	CollectorName string     `json:"collector_name"`
 	SiteID        uint       `json:"site_id"`
 	SiteName      string     `json:"site_name"`
+	SiteBaseURL   string     `json:"site_base_url"`
 	IndicatorID   uint       `json:"indicator_id"`
 	Key           string     `json:"key"`
 	Name          string     `json:"name"`
@@ -539,12 +540,16 @@ func (s *Server) handleDashboard(c *gin.Context) {
 			collectorMap[x.ID] = collInfo{Name: x.Name, SiteID: x.SiteID, LastStatus: x.LastStatus}
 		}
 	}
-	siteMap := map[uint]string{}
+	type siteInfo struct {
+		Name    string
+		BaseURL string
+	}
+	siteMap := map[uint]siteInfo{}
 	{
 		var ss []models.Site
 		_ = s.DB.Find(&ss).Error
 		for _, x := range ss {
-			siteMap[x.ID] = x.Name
+			siteMap[x.ID] = siteInfo{Name: x.Name, BaseURL: x.BaseURL}
 		}
 	}
 	cards := make([]dashboardCard, 0, len(indicators))
@@ -552,11 +557,13 @@ func (s *Server) handleDashboard(c *gin.Context) {
 		var dp models.DataPoint
 		err := s.DB.Where("indicator_id = ?", ind.ID).Order("ts desc").First(&dp).Error
 		ci := collectorMap[ind.CollectorID]
+		si := siteMap[ci.SiteID]
 		card := dashboardCard{
 			CollectorID:   ind.CollectorID,
 			CollectorName: ci.Name,
 			SiteID:        ci.SiteID,
-			SiteName:      siteMap[ci.SiteID],
+			SiteName:      si.Name,
+			SiteBaseURL:   si.BaseURL,
 			IndicatorID:   ind.ID,
 			Key:           ind.Key,
 			Name:          ind.Name,
