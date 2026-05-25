@@ -12,6 +12,7 @@ import (
 	"github.com/sunshow/siphongear/internal/crypto"
 	"github.com/sunshow/siphongear/internal/runner"
 	"github.com/sunshow/siphongear/internal/scheduler"
+	"github.com/sunshow/siphongear/internal/templates"
 )
 
 type Server struct {
@@ -20,6 +21,7 @@ type Server struct {
 	Cipher    *crypto.Cipher
 	Runner    *runner.Runner
 	Scheduler *scheduler.Scheduler
+	TplStore  *templates.Store
 	Static    fs.FS // embedded web/dist
 }
 
@@ -40,7 +42,12 @@ func NewRouter(s *Server) *gin.Engine {
 
 	authed.GET("/registry/steps", s.handleListStepMeta)
 	authed.GET("/templates", s.handleListTemplates)
+	authed.GET("/templates/export", s.handleExportTemplates)
+	authed.POST("/templates/import", s.handleImportTemplates)
+	authed.POST("/templates", s.handleCreateTemplate)
 	authed.GET("/templates/:name", s.handleGetTemplate)
+	authed.PUT("/templates/:name", s.handleUpdateTemplate)
+	authed.DELETE("/templates/:name", s.handleDeleteTemplate)
 
 	authed.GET("/sites", s.listSites)
 	authed.POST("/sites", s.createSite)

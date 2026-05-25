@@ -46,5 +46,6 @@ func Migrate(db *gorm.DB) error {
 		&models.Run{},
 		&models.StepLog{},
 		&models.DataPoint{},
+		&models.CollectorTemplate{},
 	)
 }

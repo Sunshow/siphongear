@@ -4,11 +4,15 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
 import ResponsiveTable, { type RTColumn } from '@/components/ResponsiveTable.vue'
+import SaveAsTemplateDialog from '@/components/SaveAsTemplateDialog.vue'
 
 const router = useRouter()
 const rows = ref<any[]>([])
 const sites = ref<any[]>([])
 const loading = ref(false)
+
+const saveTplVisible = ref(false)
+const saveTplCollector = ref<any>(null)
 
 async function reload() {
   loading.value = true
@@ -54,6 +58,16 @@ function gotoNew() { router.push({ name: 'collector-new' }) }
 function gotoEdit(row: any) { router.push({ name: 'collector-edit', params: { id: row.id } }) }
 function gotoRuns(row: any) { router.push({ name: 'collector-runs', params: { id: row.id } }) }
 
+function openSaveAsTemplate(row: any) {
+  saveTplCollector.value = row
+  saveTplVisible.value = true
+}
+
+function onTemplateSaved(name: string) {
+  ElMessage.success(`template "${name}" created`)
+  router.push({ name: 'templates' })
+}
+
 onMounted(reload)
 </script>
 
@@ -83,8 +97,11 @@ onMounted(reload)
         <el-button link type="primary" @click="trigger(row)">Run</el-button>
         <el-button link @click="gotoEdit(row)">Edit</el-button>
         <el-button link @click="gotoRuns(row)">Runs</el-button>
+        <el-button link @click="openSaveAsTemplate(row)">Save as Template</el-button>
         <el-button link type="danger" @click="remove(row)">Delete</el-button>
       </template>
     </ResponsiveTable>
+
+    <SaveAsTemplateDialog v-model="saveTplVisible" :collector="saveTplCollector" @saved="onTemplateSaved" />
   </div>
 </template>

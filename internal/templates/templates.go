@@ -44,6 +44,7 @@ type TemplateCredentialHint struct {
 type Template struct {
 	Name            string                  `json:"name"`
 	Description     string                  `json:"description"`
+	Source          string                  `json:"source,omitempty"` // builtin|user
 	NeedsCredential bool                    `json:"needs_credential"`
 	CredentialHint  *TemplateCredentialHint `json:"credential_hint,omitempty"`
 	ScheduleType    string                  `json:"schedule_type"`
@@ -65,10 +66,12 @@ func Register(t Template) {
 	if _, dup := registry[t.Name]; dup {
 		panic("duplicate template name: " + t.Name)
 	}
+	t.Source = "builtin"
 	registry[t.Name] = t
 }
 
-func List() []Template {
+// BuiltinList returns only built-in templates.
+func BuiltinList() []Template {
 	mu.RLock()
 	defer mu.RUnlock()
 	out := make([]Template, 0, len(registry))
@@ -79,9 +82,18 @@ func List() []Template {
 	return out
 }
 
-func Get(name string) (Template, bool) {
+// BuiltinGet returns a built-in template by name.
+func BuiltinGet(name string) (Template, bool) {
 	mu.RLock()
 	defer mu.RUnlock()
 	t, ok := registry[name]
 	return t, ok
+}
+
+func List() []Template {
+	return BuiltinList()
+}
+
+func Get(name string) (Template, bool) {
+	return BuiltinGet(name)
 }

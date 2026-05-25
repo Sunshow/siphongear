@@ -11,7 +11,17 @@ export const api = {
   registry() { return http.get('/registry/steps').then(r => r.data) },
   templates: {
     list() { return http.get('/templates').then(r => r.data) },
-    get(name: string) { return http.get(`/templates/${name}`).then(r => r.data) }
+    get(name: string) { return http.get(`/templates/${encodeURIComponent(name)}`).then(r => r.data) },
+    create(body: any) { return http.post('/templates', body).then(r => r.data) },
+    update(name: string, body: any) { return http.put(`/templates/${encodeURIComponent(name)}`, body).then(r => r.data) },
+    remove(name: string) { return http.delete(`/templates/${encodeURIComponent(name)}`).then(r => r.data) },
+    import(body: { templates: any[]; on_conflict: 'skip' | 'overwrite' }) {
+      return http.post('/templates/import', body).then(r => r.data)
+    },
+    exportAll(names?: string[]) {
+      const params = names && names.length ? { names: names.join(',') } : {}
+      return http.get('/templates/export', { params }).then(r => r.data)
+    }
   },
   dashboard() { return http.get('/dashboard').then(r => r.data) },
 

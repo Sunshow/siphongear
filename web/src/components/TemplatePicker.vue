@@ -7,6 +7,7 @@ interface CredField { name: string; label: string; type: string; required: boole
 interface Template {
   name: string
   description: string
+  source?: string
   needs_credential: boolean
   credential_hint?: { type: string; fields: CredField[] }
   schedule_type: string
@@ -17,7 +18,7 @@ interface Template {
   indicators: Array<any>
 }
 
-const props = defineProps<{ modelValue: boolean; siteId?: number }>()
+const props = defineProps<{ modelValue: boolean; siteId?: number; presetName?: string }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void
   (e: 'apply', payload: { template: Template; vars: Record<string, string>; credentialId: number; name: string; siteId: number }): void
@@ -51,8 +52,12 @@ const form = reactive<{ name: string; credential_id: number; vars: Record<string
 
 async function reloadTemplates() {
   list.value = await api.templates.list()
-  if (list.value.length && !selectedName.value) {
-    selectedName.value = list.value[0].name
+  if (list.value.length) {
+    if (props.presetName && list.value.find(t => t.name === props.presetName)) {
+      selectedName.value = props.presetName
+    } else if (!selectedName.value || !list.value.find(t => t.name === selectedName.value)) {
+      selectedName.value = list.value[0].name
+    }
     await loadDetail()
   }
 }
@@ -254,6 +259,9 @@ onMounted(() => {})
           <el-select v-model="selectedName" filterable style="width: 100%">
             <el-option v-for="t in list" :key="t.name" :label="t.name" :value="t.name">
               <span>{{ t.name }}</span>
+              <el-tag size="small" :type="t.source === 'user' ? 'success' : 'info'" style="margin-left: 8px">
+                {{ t.source || 'builtin' }}
+              </el-tag>
               <span style="margin-left: 12px; color: #999">{{ t.description }}</span>
             </el-option>
           </el-select>

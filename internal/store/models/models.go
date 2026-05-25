@@ -98,3 +98,13 @@ type DataPoint struct {
 	ValueJSON   *string   `gorm:"type:text" json:"value_json"`
 	Ts          time.Time `gorm:"index:idx_dp_collector_indicator_ts,priority:3" json:"ts"`
 }
+
+type CollectorTemplate struct {
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	Name        string         `gorm:"uniqueIndex;size:128" json:"name"`
+	Description string         `gorm:"type:text" json:"description"`
+	Spec        string         `gorm:"type:text" json:"-"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+}

@@ -20,7 +20,7 @@ import (
 	"github.com/sunshow/siphongear/internal/store"
 	"github.com/sunshow/siphongear/internal/store/models"
 	_ "github.com/sunshow/siphongear/internal/steps"
-	_ "github.com/sunshow/siphongear/internal/templates"
+	"github.com/sunshow/siphongear/internal/templates"
 	"github.com/sunshow/siphongear/pkg/logger"
 	"github.com/sunshow/siphongear/web"
 )
@@ -105,6 +105,7 @@ func main() {
 		Cipher:    cipher,
 		Runner:    r,
 		Scheduler: sch,
+		TplStore:  templates.NewStore(db),
 		Static:    staticFS,
 	}
 	router := api.NewRouter(server)

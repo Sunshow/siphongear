@@ -17,6 +17,7 @@ const stepMeta = ref<any[]>([])
 const drawer = ref(false)
 const dryResult = ref<any>(null)
 const templateDialog = ref(false)
+const presetTemplate = ref<string>('')
 
 const collector = ref<any>({
   id: 0,
@@ -107,6 +108,10 @@ async function load() {
     try { def.value = c.pipeline_json ? JSON.parse(c.pipeline_json) : { steps: [], indicators: [] } }
     catch (e) { def.value = { steps: [], indicators: [] } }
     indicators.value = await api.indicators.list(id.value)
+  }
+  if (!id.value && route.query.template) {
+    presetTemplate.value = String(route.query.template)
+    templateDialog.value = true
   }
 }
 
@@ -296,7 +301,12 @@ onMounted(load)
       <DryRunPanel :result="dryResult" />
     </el-drawer>
 
-    <TemplatePicker v-model="templateDialog" :site-id="collector.site_id" @apply="applyTemplate" />
+    <TemplatePicker
+      v-model="templateDialog"
+      :site-id="collector.site_id"
+      :preset-name="presetTemplate"
+      @apply="applyTemplate"
+    />
 
     <el-dialog v-model="addStepDialog" title="Add Step" width="480px">
       <el-form label-width="80px">

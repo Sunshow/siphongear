@@ -11,6 +11,7 @@ const activeMenu = computed(() => String(route.name || ''))
 const items = [
   { name: 'dashboard', label: 'Dashboard', icon: 'Odometer' },
   { name: 'collectors', label: 'Collectors', icon: 'Connection' },
+  { name: 'templates', label: 'Templates', icon: 'Files' },
   { name: 'sites', label: 'Sites', icon: 'MapLocation' },
   { name: 'credentials', label: 'Credentials', icon: 'Lock' },
   { name: 'settings', label: 'Settings', icon: 'Setting' }

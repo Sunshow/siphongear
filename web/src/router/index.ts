@@ -8,6 +8,7 @@ import CollectorEdit from '@/views/CollectorEdit.vue'
 import CollectorRuns from '@/views/CollectorRuns.vue'
 import RunDetail from '@/views/RunDetail.vue'
 import Settings from '@/views/Settings.vue'
+import TemplateCenter from '@/views/TemplateCenter.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -22,6 +23,7 @@ export const router = createRouter({
     { path: '/collectors/:id', name: 'collector-edit', component: CollectorEdit, props: true },
     { path: '/collectors/:id/runs', name: 'collector-runs', component: CollectorRuns, props: true },
     { path: '/runs/:id', name: 'run-detail', component: RunDetail, props: true },
+    { path: '/templates', name: 'templates', component: TemplateCenter },
     { path: '/settings', name: 'settings', component: Settings }
   ]
 })
