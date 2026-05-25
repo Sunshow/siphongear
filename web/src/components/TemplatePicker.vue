@@ -306,7 +306,7 @@ onMounted(() => {})
 
         <template v-else>
           <el-form-item label="Name" required>
-            <el-input v-model="newSite.name" placeholder="huamo" />
+            <el-input v-model="newSite.name" placeholder="my-site" />
           </el-form-item>
           <el-form-item label="Base URL" required>
             <el-input v-model="newSite.base_url" placeholder="http://example.com:port" />
@@ -403,10 +403,6 @@ onMounted(() => {})
             </el-checkbox-group>
           </el-form-item>
         </template>
-
-        <el-alert type="info" :closable="false" show-icon>
-          Save 后会自动创建对应 Indicator（{{ detail?.indicators?.map(i => i.key).join(', ') || '无' }}），调度类型 = {{ scheduleType }}，间隔/cron = {{ scheduleSpec || '—' }}。
-        </el-alert>
       </el-form>
     </div>
     <el-empty v-else description="暂无模板" />
