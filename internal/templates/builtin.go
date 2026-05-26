@@ -250,6 +250,64 @@ return { vars: {
 	})
 
 	Register(Template{
+		Name:            "deepseek-balance",
+		Description:     "DeepSeek 官方 API：使用 API Key 调 /user/balance 取余额（默认 CNY）",
+		NeedsCredential: true,
+		CredentialHint: &TemplateCredentialHint{
+			Type: "token",
+			Fields: []TemplateCredentialField{
+				{Name: "api_key", Label: "API Key", Type: "password", Required: true, Placeholder: "sk-xxxxxxxx (DeepSeek 控制台 -> API keys)"},
+			},
+		},
+		ScheduleType: "interval",
+		ScheduleSpec: "30m",
+		Timeout:      30,
+		Variables: []TemplateVariable{
+			{Name: "base_url", Label: "Base URL", Default: "https://api.deepseek.com", Placeholder: "https://api.deepseek.com", Required: true},
+		},
+		Pipeline: pipeline.Definition{
+			Steps: []pipeline.StepConfig{
+				{Kind: "input.credential", Name: "load credential",
+					Config: map[string]any{
+						"credential_id": 0,
+						"var_name":      "cred",
+					}},
+				{Kind: "fetch.http", Name: "fetch balance",
+					Config: map[string]any{
+						"method": "GET",
+						"url":    "{{BASE_URL}}/user/balance",
+						"headers": map[string]any{
+							"Authorization": "Bearer {{.vars.cred.api_key}}",
+							"Accept":        "application/json",
+						},
+						"timeout": 15,
+					}},
+				{Kind: "parse.json", Name: "parse balance"},
+				{Kind: "extract.jsonpath", Name: "extract balance",
+					Config: map[string]any{
+						"mappings": []any{
+							map[string]any{"name": "balance", "path": "$.balance_infos[0].total_balance", "type": "number"},
+							map[string]any{"name": "granted", "path": "$.balance_infos[0].granted_balance", "type": "number"},
+							map[string]any{"name": "topped_up", "path": "$.balance_infos[0].topped_up_balance", "type": "number"},
+							map[string]any{"name": "currency", "path": "$.balance_infos[0].currency", "type": "string"},
+							map[string]any{"name": "is_available", "path": "$.is_available", "type": "bool"},
+						},
+					}},
+			},
+			Indicators: []pipeline.IndicatorBind{
+				{Key: "balance"},
+				{Key: "granted"},
+				{Key: "topped_up"},
+			},
+		},
+		Indicators: []TemplateIndicator{
+			{Key: "balance", Name: "余额", Type: "number", Unit: "CNY", Display: "line"},
+			{Key: "granted", Name: "赠金", Type: "number", Unit: "CNY", Display: "line"},
+			{Key: "topped_up", Name: "充值", Type: "number", Unit: "CNY", Display: "line"},
+		},
+	})
+
+	Register(Template{
 		Name:            "rixapi-balance-accesstoken",
 		Description:     "RixAPI / 类 NewAPI 商业分支：使用「访问密钥」+ user_id 直接调 /api/user/self 取 balance（已是 USD）",
 		NeedsCredential: true,
