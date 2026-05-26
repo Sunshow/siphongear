@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="sgBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="sgDrop" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="108" ry="108" fill="url(#sgBg)"/>
+
+  <g fill="#ffffff" fill-opacity="0.92">
+    <rect x="216" y="40"  width="80" height="62" rx="14"/>
+    <rect x="216" y="410" width="80" height="62" rx="14"/>
+    <rect x="40"  y="216" width="62" height="80" rx="14"/>
+    <rect x="410" y="216" width="62" height="80" rx="14"/>
+  </g>
+
+  <path fill="url(#sgDrop)"
+        d="M256 116 C256 116 162 244 162 308 A94 94 0 1 0 350 308 C350 244 256 116 256 116 Z"/>
+
+  <ellipse cx="218" cy="276" rx="22" ry="36" fill="#ffffff" fill-opacity="0.45" transform="rotate(-22 218 276)"/>
+</svg>
