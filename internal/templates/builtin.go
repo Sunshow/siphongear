@@ -262,9 +262,7 @@ return { vars: {
 		ScheduleType: "interval",
 		ScheduleSpec: "30m",
 		Timeout:      30,
-		Variables: []TemplateVariable{
-			{Name: "base_url", Label: "Base URL", Default: "https://api.deepseek.com", Placeholder: "https://api.deepseek.com", Required: true},
-		},
+		Variables:    []TemplateVariable{},
 		Pipeline: pipeline.Definition{
 			Steps: []pipeline.StepConfig{
 				{Kind: "input.credential", Name: "load credential",
@@ -275,7 +273,7 @@ return { vars: {
 				{Kind: "fetch.http", Name: "fetch balance",
 					Config: map[string]any{
 						"method": "GET",
-						"url":    "{{BASE_URL}}/user/balance",
+						"url":    "https://api.deepseek.com/user/balance",
 						"headers": map[string]any{
 							"Authorization": "Bearer {{.vars.cred.api_key}}",
 							"Accept":        "application/json",
