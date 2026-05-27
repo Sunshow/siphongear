@@ -121,6 +121,8 @@ type ThresholdRule struct {
 	ConditionJSON    string         `gorm:"type:text" json:"condition_json"`
 	ActionJSON       string         `gorm:"type:text" json:"action_json"`
 	NotifyChannelIDs string         `gorm:"size:255" json:"notify_channel_ids"`
+	NotifyTitleTpl   string         `gorm:"size:512" json:"notify_title_tpl"`
+	NotifyBodyTpl    string         `gorm:"type:text"  json:"notify_body_tpl"`
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`

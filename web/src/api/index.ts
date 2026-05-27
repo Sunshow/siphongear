@@ -73,7 +73,8 @@ export const api = {
     get(id: number) { return http.get(`/rules/${id}`).then(r => r.data) },
     create(b: any) { return http.post('/rules', b).then(r => r.data) },
     update(id: number, b: any) { return http.put(`/rules/${id}`, b).then(r => r.data) },
-    remove(id: number) { return http.delete(`/rules/${id}`).then(r => r.data) }
+    remove(id: number) { return http.delete(`/rules/${id}`).then(r => r.data) },
+    previewNotify(b: any) { return http.post('/rules/preview-notify', b).then(r => r.data) }
   },
 
   notify: {

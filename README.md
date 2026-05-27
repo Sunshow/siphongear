@@ -25,6 +25,7 @@
 - **三种调度方式**：固定间隔、cron 表达式、事件链式触发（A 跑完触发 B）
 - **Site Tags + Dashboard 过滤**：上百个 collector 也能按 tag 多选分组
 - **阈值告警规则（Rules）**：指标 `<` / `>` / `=` 阈值时仪表盘卡片高亮，可按 tag 限定生效范围
+- **多通道告警通知**：规则可挂多个通知实例，仅在 OK→alert / alert→OK 翻转时推送，避免刷屏；首期内置 ServerChan，类型可扩展；title / body 支持 Go `text/template` 自定义，留空走默认
 - **Dashboard 自动刷新**：默认 30s 一次，可关，间隔可调（10/30/60/120/300s），一键「全部触发一次」
 - **指标历史曲线**：每个指标都有时序数据，可查询 / 画图
 - **Dry Run**：不写库试跑流水线，立即查看每个 Step 的输出片段
@@ -114,7 +115,7 @@ cd web && npm install && npm run dev
 
 ## 使用指南（按页面）
 
-应用左侧导航 7 个页面，自上而下：
+应用左侧导航 8 个页面，自上而下：
 
 ### Dashboard（仪表盘）
 
@@ -157,6 +158,18 @@ cd web && npm install && npm run dev
 - 目标：`all`（所有指标） 或 `tags`（按 Site tag 限定）
 - 动作：`indicator_color`（仪表盘卡片高亮）
 - 同一指标命中多条规则时按 Priority 选最高优先级
+- **Notify**：可勾选一个或多个通知实例，仅在 OK→alert 与 alert→OK 翻转时推送（按规则 + 指标维度记状态，避免刷屏）
+- **自定义模板**：title / body 两个 Go `text/template` 字段，留空用内置默认；上下文含 `.Severity / .Rule / .Collector / .Site / .Indicator / .Value / .ValueRaw / .ValueNum / .RunID / .Time` 与 `upper / lower / printf / default / now` 函数；支持 alert / recovery 两种 severity 的 Preview 试渲染
+
+### Notifications（通知）
+
+通知系统两级：**通知类型**（代码内置实现，可扩展）+ **通知实例**（具体配置实例）。
+
+- **Channels** tab：基于通知类型创建实例，名称 + 启用开关 + 备注 + 类型自带的参数表单（含 `secret` 字段走 password input）；payload 全部 AES-GCM 加密落库；提供 **Test** 按钮一键试发，结果写入日志
+- **Logs** tab：每次实际投递（包括 Test）都会写一条 `notification_logs`，包含 channel / 严重级别 / 标题 / 状态 / 错误
+- 内置类型：`serverchan`（方糖，`https://sctapi.ftqq.com`）；`channel` 字段可选，留空用方糖控制台默认通道，多通道用 `|` 分隔，如 `9|66`
+
+加新通知类型：在 `internal/notify/<type>/` 下实现 `notify.Notifier`，`init()` 调 `notify.Register(Meta{...}, factory)`，并在 `internal/notify/builtin/builtin.go` 加 blank import；前端表单按 schema 自动渲染，无需 UI 改动。
 
 ### Settings（设置）
 
@@ -342,7 +355,13 @@ DELETE /indicators/:id
 GET    /runs/:id                           run + 全部 step logs
 GET    /dashboard                          所有指标 + 最新值，按 site 分组（带 tag、规则匹配）
 
-CRUD   /rules                              阈值告警规则
+CRUD   /rules                              阈值告警规则（含 notify_channel_ids、notify_title_tpl、notify_body_tpl）
+POST   /rules/preview-notify               用 mock 上下文渲染 title/body 模板
+
+GET    /notify/types                       已注册的通知类型 + schema
+CRUD   /notify/channels                    通知实例，payload AES-GCM 加密
+POST   /notify/channels/:id/test           试发
+GET    /notify/logs?channel_id=&rule_id=&collector_id=&limit=
 ```
 
 ---
@@ -379,6 +398,15 @@ Register(Template{
 - 运行时模板用 `{{.vars.foo}}`（Go text/template，每次 run 求值）
 - 凭证字段访问 `{{.vars.<var_name>.<field>}}`，`<var_name>` 默认 `cred`
 
+### 加一个新通知类型
+
+1. 在 `internal/notify/<type>/` 下新建 go 文件，实现 `notify.Notifier`：`Type() string` + `Send(ctx, msg notify.Message) error`
+2. 提供 `Factory` 函数 `func(payload map[string]any) (notify.Notifier, error)`，从解密后的 payload 构造实例
+3. `init()` 里 `notify.Register(notify.Meta{Type, Description, Schema}, factory)`；schema 用 `string / number / boolean` 字段（标 `secret: true` 的会走 password input）
+4. 在 `internal/notify/builtin/builtin.go` 加 `_ "..."` blank import 让其被注册
+
+前端 Notifications 页面按 schema 自动渲染表单，无需任何 UI 改动。
+
 ### 不开 UI，仅通过 API 集成
 
 直接调上面 REST API 即可。典型流程：`POST /auth/login` 拿 token → `POST /sites` → `POST /credentials` → `POST /collectors`（带 pipeline JSON）→ `POST /collectors/:id/run`。
@@ -396,6 +424,9 @@ siphongear/
 │   ├── config/                 koanf yaml + env
 │   ├── crypto/                 AES-GCM
 │   ├── events/                 内存 pub/sub
+│   ├── notify/                 通知类型注册表 + Dispatcher（订阅 run.completed）
+│   │   ├── builtin/            内置类型 blank import 集中处
+│   │   └── serverchan/         ServerChan 实现
 │   ├── pipeline/               Step / Engine / Registry
 │   ├── runner/                 触发 collector，落库 run/step/datapoints
 │   ├── rules/                  阈值规则引擎
@@ -440,7 +471,7 @@ make clean       # 清掉 bin/ web/dist/ data/
 
 ## English summary
 
-SiphonGear is a configuration-driven, single-binary collector + dashboard. Define an `Input → Fetch → Transform → Parse → Extract` pipeline per task, schedule it (interval / cron / event), and watch values flow into a time-series dashboard with tag filtering and threshold-based alert rules. Credentials are AES-GCM encrypted at rest. Defaults to pure-Go SQLite (no cgo); MySQL / Postgres also supported. Originally built for tracking recharge balances across many LLM gateways, generalized to any periodic web/API metric collection. UI in Vue 3 + Element Plus, embedded via `go:embed`.
+SiphonGear is a configuration-driven, single-binary collector + dashboard. Define an `Input → Fetch → Transform → Parse → Extract` pipeline per task, schedule it (interval / cron / event), and watch values flow into a time-series dashboard with tag filtering and threshold-based alert rules. Rules can fan out to pluggable notification channels (ServerChan built in) on OK→alert / alert→OK transitions, with optional Go-template title/body. Credentials and channel payloads are AES-GCM encrypted at rest. Defaults to pure-Go SQLite (no cgo); MySQL / Postgres also supported. Originally built for tracking recharge balances across many LLM gateways, generalized to any periodic web/API metric collection. UI in Vue 3 + Element Plus, embedded via `go:embed`.
 
 ---
 

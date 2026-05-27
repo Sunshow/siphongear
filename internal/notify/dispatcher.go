@@ -1,10 +1,12 @@
 package notify
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -195,7 +197,7 @@ func (d *Dispatcher) handle(ctx context.Context, ev events.Event) {
 			continue
 		}
 
-		msg := buildMessage(rule, ind, collector, site, raw, num, hasNum, severity, runID, now)
+		msg := buildMessage(d, rule, ind, collector, site, raw, num, hasNum, severity, runID, now)
 		d.fanout(ctx, rule.ID, ind.ID, collector.ID, channelIDs, msg)
 	}
 }
@@ -403,35 +405,227 @@ func formatValue(raw any, num float64, hasNum bool) string {
 	}
 }
 
-func buildMessage(rule models.ThresholdRule, ind models.Indicator, c models.Collector, site models.Site, raw any, num float64, hasNum bool, severity string, runID uint64, ts time.Time) Message {
-	prefix := "[ALERT]"
-	if severity == SeverityRecovery {
-		prefix = "[RECOVERY]"
-	}
+// MessageContext is the data exposed to user-supplied notification templates.
+type MessageContext struct {
+	Severity  string
+	Rule      MsgRule
+	Collector MsgCollector
+	Site      MsgSite
+	Indicator MsgIndicator
+	Value     string
+	ValueRaw  any
+	ValueNum  *float64
+	RunID     uint64
+	Time      string
+}
+
+type MsgRule struct {
+	ID           uint
+	Name         string
+	IndicatorKey string
+}
+
+type MsgCollector struct {
+	ID   uint
+	Name string
+}
+
+type MsgSite struct {
+	ID      uint
+	Name    string
+	BaseURL string
+	Tags    []string
+}
+
+type MsgIndicator struct {
+	ID   uint
+	Key  string
+	Name string
+	Type string
+	Unit string
+}
+
+func newContext(rule models.ThresholdRule, ind models.Indicator, c models.Collector, site models.Site, raw any, num float64, hasNum bool, severity string, runID uint64, ts time.Time) MessageContext {
 	indName := ind.Name
 	if indName == "" {
 		indName = ind.Key
 	}
-	title := fmt.Sprintf("%s %s · %s", prefix, c.Name, indName)
-
 	val := formatValue(raw, num, hasNum)
 	if ind.Unit != "" {
 		val = val + " " + ind.Unit
 	}
+	mc := MessageContext{
+		Severity: severity,
+		Rule: MsgRule{
+			ID:           rule.ID,
+			Name:         rule.Name,
+			IndicatorKey: rule.IndicatorKey,
+		},
+		Collector: MsgCollector{ID: c.ID, Name: c.Name},
+		Site: MsgSite{
+			ID:      site.ID,
+			Name:    site.Name,
+			BaseURL: site.BaseURL,
+			Tags:    parseTags(site.Tags),
+		},
+		Indicator: MsgIndicator{
+			ID:   ind.ID,
+			Key:  ind.Key,
+			Name: indName,
+			Type: ind.Type,
+			Unit: ind.Unit,
+		},
+		Value:    val,
+		ValueRaw: raw,
+		RunID:    runID,
+		Time:     ts.Format(time.RFC3339),
+	}
+	if hasNum {
+		n := num
+		mc.ValueNum = &n
+	}
+	return mc
+}
+
+func defaultTitle(mc MessageContext) string {
+	prefix := "[ALERT]"
+	if mc.Severity == SeverityRecovery {
+		prefix = "[RECOVERY]"
+	}
+	return fmt.Sprintf("%s %s · %s", prefix, mc.Collector.Name, mc.Indicator.Name)
+}
+
+func defaultBody(mc MessageContext) string {
 	var b strings.Builder
-	b.WriteString("**Rule**: " + rule.Name + "\n\n")
-	b.WriteString("**Collector**: " + c.Name + "\n\n")
-	if site.Name != "" {
-		b.WriteString("**Site**: " + site.Name + "\n\n")
+	b.WriteString("**Rule**: " + mc.Rule.Name + "\n\n")
+	b.WriteString("**Collector**: " + mc.Collector.Name + "\n\n")
+	if mc.Site.Name != "" {
+		b.WriteString("**Site**: " + mc.Site.Name + "\n\n")
 	}
-	b.WriteString("**Indicator**: " + indName + " (`" + ind.Key + "`)\n\n")
-	b.WriteString("**Value**: " + val + "\n\n")
-	b.WriteString("**Severity**: " + severity + "\n\n")
-	if runID != 0 {
-		b.WriteString(fmt.Sprintf("**Run**: #%d\n\n", runID))
+	b.WriteString("**Indicator**: " + mc.Indicator.Name + " (`" + mc.Indicator.Key + "`)\n\n")
+	b.WriteString("**Value**: " + mc.Value + "\n\n")
+	b.WriteString("**Severity**: " + mc.Severity + "\n\n")
+	if mc.RunID != 0 {
+		b.WriteString(fmt.Sprintf("**Run**: #%d\n\n", mc.RunID))
 	}
-	b.WriteString("**At**: " + ts.Format(time.RFC3339))
-	return Message{Title: title, Body: b.String(), Severity: severity}
+	b.WriteString("**At**: " + mc.Time)
+	return b.String()
+}
+
+var tplFuncs = template.FuncMap{
+	"upper":  strings.ToUpper,
+	"lower":  strings.ToLower,
+	"printf": fmt.Sprintf,
+	"default": func(d, v any) any {
+		if v == nil {
+			return d
+		}
+		if s, ok := v.(string); ok && s == "" {
+			return d
+		}
+		return v
+	},
+	"now": func() string { return time.Now().Format(time.RFC3339) },
+}
+
+// RenderTemplate evaluates a Go text/template against a MessageContext. Empty
+// template returns ("", nil). Returned string is trimmed of trailing newlines.
+func RenderTemplate(tpl string, mc MessageContext) (string, error) {
+	if strings.TrimSpace(tpl) == "" {
+		return "", nil
+	}
+	t, err := template.New("notify").Funcs(tplFuncs).Parse(tpl)
+	if err != nil {
+		return "", fmt.Errorf("parse: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, mc); err != nil {
+		return "", fmt.Errorf("exec: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// renderOrDefault renders tpl against mc; on error or empty result it returns
+// fallback and logs a warning if there was an error.
+func (d *Dispatcher) renderOrDefault(tpl, fallback string, mc MessageContext, what string) string {
+	if strings.TrimSpace(tpl) == "" {
+		return fallback
+	}
+	out, err := RenderTemplate(tpl, mc)
+	if err != nil {
+		d.logger.Warn().Err(err).Str("field", what).Uint("rule_id", mc.Rule.ID).Msg("notify template render failed; falling back to default")
+		return fallback
+	}
+	if strings.TrimSpace(out) == "" {
+		return fallback
+	}
+	return out
+}
+
+func buildMessage(d *Dispatcher, rule models.ThresholdRule, ind models.Indicator, c models.Collector, site models.Site, raw any, num float64, hasNum bool, severity string, runID uint64, ts time.Time) Message {
+	mc := newContext(rule, ind, c, site, raw, num, hasNum, severity, runID, ts)
+	title := defaultTitle(mc)
+	body := defaultBody(mc)
+	if d != nil {
+		title = d.renderOrDefault(rule.NotifyTitleTpl, title, mc, "title")
+		body = d.renderOrDefault(rule.NotifyBodyTpl, body, mc, "body")
+	}
+	return Message{Title: title, Body: body, Severity: severity}
+}
+
+// PreviewMessage renders the supplied templates against a deterministic mock
+// context for the rules preview API. severity defaults to "alert".
+func PreviewMessage(titleTpl, bodyTpl, severity string) (Message, string, string) {
+	if severity == "" {
+		severity = SeverityAlert
+	}
+	num := 12.34
+	mc := MessageContext{
+		Severity: severity,
+		Rule: MsgRule{
+			ID:           1,
+			Name:         "Sample rule",
+			IndicatorKey: "balance",
+		},
+		Collector: MsgCollector{ID: 10, Name: "Sample Collector"},
+		Site: MsgSite{
+			ID:      5,
+			Name:    "example.com",
+			BaseURL: "https://example.com",
+			Tags:    []string{"prod", "billing"},
+		},
+		Indicator: MsgIndicator{
+			ID:   42,
+			Key:  "balance",
+			Name: "Balance",
+			Type: "number",
+			Unit: "CNY",
+		},
+		Value:    "12.34 CNY",
+		ValueRaw: num,
+		ValueNum: &num,
+		RunID:    9999,
+		Time:     time.Now().Format(time.RFC3339),
+	}
+	title := defaultTitle(mc)
+	body := defaultBody(mc)
+	titleErr := ""
+	bodyErr := ""
+	if strings.TrimSpace(titleTpl) != "" {
+		if v, err := RenderTemplate(titleTpl, mc); err != nil {
+			titleErr = err.Error()
+		} else {
+			title = v
+		}
+	}
+	if strings.TrimSpace(bodyTpl) != "" {
+		if v, err := RenderTemplate(bodyTpl, mc); err != nil {
+			bodyErr = err.Error()
+		} else {
+			body = v
+		}
+	}
+	return Message{Title: title, Body: body, Severity: severity}, titleErr, bodyErr
 }
 
 func truncate(s string, n int) string {

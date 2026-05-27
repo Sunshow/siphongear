@@ -112,8 +112,10 @@ func init() {
 				"secret":   true,
 			},
 			"channel": map[string]any{
-				"type":  "string",
-				"label": "Channel override (e.g., 9|66)",
+				"type":        "string",
+				"label":       "Channel",
+				"placeholder": "e.g., 9|66",
+				"description": "Optional. Override message channel(s) for this push. Empty = use the default channels configured on the ServerChan dashboard. Up to 2 channels joined by '|'.",
 			},
 			"noip": map[string]any{
 				"type":  "boolean",

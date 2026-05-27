@@ -27,6 +27,8 @@ interface RuleRow {
   actions: Action[]
   notify_channel_ids: string
   notify_channel_ids_arr: number[]
+  notify_title_tpl: string
+  notify_body_tpl: string
   created_at?: string
   updated_at?: string
 }
@@ -64,8 +66,15 @@ const form = reactive({
   cond_op: 'lt' as Condition['op'],
   cond_value: 0,
   action_type: 'indicator_color' as Action['type'],
-  notify_channel_ids: [] as number[]
+  notify_channel_ids: [] as number[],
+  notify_title_tpl: '',
+  notify_body_tpl: ''
 })
+
+const previewDialog = ref(false)
+const previewLoading = ref(false)
+const previewResult = ref<{ title: string; body: string; severity: string; title_err: string; body_err: string } | null>(null)
+const previewSeverity = ref<'alert' | 'recovery'>('alert')
 
 const columns: RTColumn[] = [
   { key: 'id', label: 'ID', width: 80, hideOnMobile: true },
@@ -157,7 +166,9 @@ function openCreate() {
     cond_op: 'lt',
     cond_value: 0,
     action_type: 'indicator_color',
-    notify_channel_ids: []
+    notify_channel_ids: [],
+    notify_title_tpl: '',
+    notify_body_tpl: ''
   })
   tagInput.value = ''
   tagInputVisible.value = false
@@ -178,7 +189,9 @@ function openEdit(row: RuleRow) {
     cond_op: c?.op || 'lt',
     cond_value: c?.value ?? 0,
     action_type: a?.type || 'indicator_color',
-    notify_channel_ids: [...(row.notify_channel_ids_arr || [])]
+    notify_channel_ids: [...(row.notify_channel_ids_arr || [])],
+    notify_title_tpl: row.notify_title_tpl || '',
+    notify_body_tpl: row.notify_body_tpl || ''
   })
   tagInput.value = ''
   tagInputVisible.value = false
@@ -245,7 +258,9 @@ async function save() {
     target_tags: form.target_type === 'tags' ? form.target_tags : [],
     conditions: [{ type: 'compare', op: form.cond_op, value: Number(form.cond_value) }],
     actions: [{ type: form.action_type }],
-    notify_channel_ids: form.notify_channel_ids
+    notify_channel_ids: form.notify_channel_ids,
+    notify_title_tpl: form.notify_title_tpl,
+    notify_body_tpl: form.notify_body_tpl
   }
   try {
     if (form.id) await api.rules.update(form.id, body)
@@ -276,12 +291,32 @@ async function toggleEnabled(row: RuleRow) {
       target_tags: fresh.target_tags_arr || [],
       conditions: fresh.conditions || [],
       actions: fresh.actions || [],
-      notify_channel_ids: fresh.notify_channel_ids_arr || []
+      notify_channel_ids: fresh.notify_channel_ids_arr || [],
+      notify_title_tpl: fresh.notify_title_tpl || '',
+      notify_body_tpl: fresh.notify_body_tpl || ''
     }
     await api.rules.update(row.id, body)
     await reload()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || 'toggle failed')
+  }
+}
+
+async function previewNotify() {
+  previewLoading.value = true
+  previewResult.value = null
+  try {
+    const res = await api.rules.previewNotify({
+      title_tpl: form.notify_title_tpl,
+      body_tpl: form.notify_body_tpl,
+      severity: previewSeverity.value
+    })
+    previewResult.value = res
+    previewDialog.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'preview failed')
+  } finally {
+    previewLoading.value = false
   }
 }
 
@@ -419,6 +454,47 @@ onMounted(async () => {
           </div>
         </el-form-item>
 
+        <el-collapse v-if="form.notify_channel_ids.length" class="tpl-collapse">
+          <el-collapse-item>
+            <template #title>
+              <span class="tpl-collapse-title">Notification template (optional)</span>
+            </template>
+            <el-form-item label="Title template">
+              <el-input
+                v-model="form.notify_title_tpl"
+                placeholder="[ALERT] {{.Collector.Name}} · {{.Indicator.Name}}"
+              />
+            </el-form-item>
+            <el-form-item label="Body template">
+              <el-input
+                v-model="form.notify_body_tpl"
+                type="textarea"
+                :rows="6"
+                placeholder="**Rule**: {{.Rule.Name}}&#10;**Value**: {{.Value}}&#10;**At**: {{.Time}}"
+              />
+            </el-form-item>
+            <el-form-item label=" ">
+              <div class="tpl-help">
+                <div>Leave both blank to use the built-in template. Go <code>text/template</code> syntax.</div>
+                <div class="tpl-vars">
+                  Variables: <code>.Severity</code>, <code>.Rule.{ID,Name,IndicatorKey}</code>,
+                  <code>.Collector.{ID,Name}</code>, <code>.Site.{ID,Name,BaseURL,Tags}</code>,
+                  <code>.Indicator.{ID,Key,Name,Type,Unit}</code>, <code>.Value</code>,
+                  <code>.ValueRaw</code>, <code>.ValueNum</code>, <code>.RunID</code>, <code>.Time</code>.
+                  Functions: <code>upper lower printf default now</code>.
+                </div>
+                <div class="tpl-actions">
+                  <el-radio-group v-model="previewSeverity" size="small">
+                    <el-radio-button value="alert">alert</el-radio-button>
+                    <el-radio-button value="recovery">recovery</el-radio-button>
+                  </el-radio-group>
+                  <el-button size="small" :loading="previewLoading" @click="previewNotify">Preview</el-button>
+                </div>
+              </div>
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
+
         <el-form-item label="Target">
           <el-radio-group v-model="form.target_type">
             <el-radio value="all">All sites</el-radio>
@@ -464,6 +540,33 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="dialog = false">Cancel</el-button>
         <el-button type="primary" @click="save">Save</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="previewDialog" title="Notification preview" width="600px">
+      <div v-if="previewResult" class="preview-block">
+        <div class="preview-row">
+          <div class="preview-label">Severity</div>
+          <el-tag size="small" effect="plain" :type="previewResult.severity === 'recovery' ? 'success' : 'warning'">
+            {{ previewResult.severity }}
+          </el-tag>
+        </div>
+        <div class="preview-row">
+          <div class="preview-label">Title</div>
+          <div class="preview-value">{{ previewResult.title }}</div>
+        </div>
+        <div v-if="previewResult.title_err" class="preview-error">title error: {{ previewResult.title_err }}</div>
+        <div class="preview-row preview-row-stack">
+          <div class="preview-label">Body</div>
+          <pre class="preview-value preview-body">{{ previewResult.body }}</pre>
+        </div>
+        <div v-if="previewResult.body_err" class="preview-error">body error: {{ previewResult.body_err }}</div>
+        <div v-if="!previewResult.title_err && !previewResult.body_err" class="form-hint" style="margin-top: 8px; margin-left: 0">
+          Rendered against a sample context (Site=example.com, Indicator=Balance, Value=12.34 CNY).
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="previewDialog = false">Close</el-button>
       </template>
     </el-dialog>
   </div>
@@ -517,5 +620,77 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--sg-text-secondary);
   margin-left: 8px;
+}
+.tpl-collapse {
+  margin-bottom: 18px;
+  border-top: 1px solid var(--sg-border-soft);
+  border-bottom: 1px solid var(--sg-border-soft);
+}
+.tpl-collapse-title {
+  font-size: 13px;
+  color: var(--sg-text-secondary);
+}
+.tpl-help {
+  font-size: 12px;
+  color: var(--sg-text-secondary);
+  line-height: 1.6;
+  width: 100%;
+}
+.tpl-help code {
+  background: var(--sg-aside-hover-bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.tpl-vars {
+  margin-top: 4px;
+}
+.tpl-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.preview-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.preview-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+.preview-row-stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.preview-label {
+  width: 64px;
+  flex-shrink: 0;
+  color: var(--sg-text-secondary);
+  font-size: 12px;
+}
+.preview-value {
+  color: var(--sg-text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.preview-body {
+  background: var(--sg-aside-hover-bg);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  width: 100%;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+.preview-error {
+  color: var(--el-color-danger);
+  font-size: 12px;
 }
 </style>

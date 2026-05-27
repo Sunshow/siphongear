@@ -22,6 +22,8 @@ type ruleIn struct {
 	Conditions       []rules.Condition `json:"conditions"`
 	Actions          []rules.Action    `json:"actions"`
 	NotifyChannelIDs []uint            `json:"notify_channel_ids"`
+	NotifyTitleTpl   string            `json:"notify_title_tpl"`
+	NotifyBodyTpl    string            `json:"notify_body_tpl"`
 }
 
 type ruleOut struct {
@@ -110,6 +112,8 @@ func applyRuleIn(in *ruleIn, row *models.ThresholdRule) error {
 	row.ConditionJSON = condJSON
 	row.ActionJSON = actJSON
 	row.NotifyChannelIDs = notify.FormatChannelIDs(in.NotifyChannelIDs)
+	row.NotifyTitleTpl = strings.TrimSpace(in.NotifyTitleTpl)
+	row.NotifyBodyTpl = strings.TrimRight(in.NotifyBodyTpl, "\n\r\t ")
 	return nil
 }
 
@@ -216,4 +220,26 @@ func (s *Server) deleteRule(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"ok": true})
+}
+
+type rulePreviewIn struct {
+	TitleTpl string `json:"title_tpl"`
+	BodyTpl  string `json:"body_tpl"`
+	Severity string `json:"severity"`
+}
+
+func (s *Server) previewRuleNotify(c *gin.Context) {
+	var in rulePreviewIn
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	msg, titleErr, bodyErr := notify.PreviewMessage(in.TitleTpl, in.BodyTpl, in.Severity)
+	c.JSON(200, gin.H{
+		"title":     msg.Title,
+		"body":      msg.Body,
+		"severity":  msg.Severity,
+		"title_err": titleErr,
+		"body_err":  bodyErr,
+	})
 }

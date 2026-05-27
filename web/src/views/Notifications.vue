@@ -313,40 +313,44 @@ function fmtTime(t: string): string {
           :label="(s as any).label || key"
           :required="!!(s as any).required"
         >
-          <template v-if="(s as any).type === 'string' && (s as any).secret">
-            <el-input
-              :model-value="form.payload[key] ?? ''"
-              type="password"
-              show-password
-              :placeholder="form.id ? 'Leave blank to keep current' : ((s as any).placeholder || '')"
-              @update:model-value="(v: string) => setPayload(key, v)"
-            />
-          </template>
-          <template v-else-if="(s as any).type === 'string'">
-            <el-input
-              :model-value="form.payload[key] ?? ''"
-              :placeholder="(s as any).placeholder || ''"
-              @update:model-value="(v: string) => setPayload(key, v)"
-            />
-          </template>
-          <template v-else-if="(s as any).type === 'number'">
-            <el-input-number
-              :model-value="Number(form.payload[key] ?? 0)"
-              @update:model-value="(v: any) => setPayload(key, v)"
-            />
-          </template>
-          <template v-else-if="(s as any).type === 'boolean'">
-            <el-switch
-              :model-value="!!form.payload[key]"
-              @update:model-value="(v: any) => setPayload(key, v)"
-            />
-          </template>
-          <template v-else>
-            <el-input
-              :model-value="form.payload[key] ?? ''"
-              @update:model-value="(v: string) => setPayload(key, v)"
-            />
-          </template>
+          <div class="field-wrap">
+            <template v-if="(s as any).type === 'string' && (s as any).secret">
+              <el-input
+                :model-value="form.payload[key] ?? ''"
+                type="password"
+                show-password
+                :placeholder="form.id ? 'Leave blank to keep current' : ((s as any).placeholder || '')"
+                @update:model-value="(v: string) => setPayload(key, v)"
+              />
+            </template>
+            <template v-else-if="(s as any).type === 'string'">
+              <el-input
+                :model-value="form.payload[key] ?? ''"
+                :placeholder="(s as any).placeholder || ''"
+                @update:model-value="(v: string) => setPayload(key, v)"
+              />
+            </template>
+            <template v-else-if="(s as any).type === 'number'">
+              <el-input-number
+                :model-value="Number(form.payload[key] ?? 0)"
+                @update:model-value="(v: any) => setPayload(key, v)"
+              />
+            </template>
+            <template v-else-if="(s as any).type === 'boolean'">
+              <el-switch
+                :model-value="!!form.payload[key]"
+                @update:model-value="(v: any) => setPayload(key, v)"
+              />
+            </template>
+            <template v-else>
+              <el-input
+                :model-value="form.payload[key] ?? ''"
+                :placeholder="(s as any).placeholder || ''"
+                @update:model-value="(v: string) => setPayload(key, v)"
+              />
+            </template>
+            <div v-if="(s as any).description" class="field-hint">{{ (s as any).description }}</div>
+          </div>
         </el-form-item>
 
         <el-form-item label="Notes">
@@ -381,5 +385,14 @@ function fmtTime(t: string): string {
 }
 .log-muted {
   color: var(--sg-text-muted);
+}
+.field-wrap {
+  width: 100%;
+}
+.field-hint {
+  font-size: 12px;
+  color: var(--sg-text-secondary);
+  line-height: 1.5;
+  margin-top: 4px;
 }
 </style>
