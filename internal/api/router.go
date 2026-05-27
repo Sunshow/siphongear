@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/sunshow/siphongear/internal/apikey"
 	"github.com/sunshow/siphongear/internal/auth"
 	"github.com/sunshow/siphongear/internal/crypto"
 	"github.com/sunshow/siphongear/internal/notify"
@@ -24,6 +25,7 @@ type Server struct {
 	Scheduler        *scheduler.Scheduler
 	TplStore         *templates.Store
 	NotifyDispatcher *notify.Dispatcher
+	APIKeyVerifier   *apikey.Verifier
 	Static           fs.FS // embedded web/dist
 }
 
@@ -96,7 +98,20 @@ func NewRouter(s *Server) *gin.Engine {
 	authed.POST("/notify/channels/:id/test", s.testNotifyChannel)
 	authed.GET("/notify/logs", s.listNotifyLogs)
 
+	authed.GET("/api-keys", s.listAPIKeys)
+	authed.POST("/api-keys", s.createAPIKey)
+	authed.PUT("/api-keys/:id", s.updateAPIKey)
+	authed.DELETE("/api-keys/:id", s.deleteAPIKey)
+	authed.POST("/api-keys/:id/rotate", s.rotateAPIKey)
+
 	authed.GET("/dashboard", s.handleDashboard)
+
+	if s.APIKeyVerifier != nil {
+		pub := r.Group("/api/public")
+		pub.Use(apiKeyMiddleware(s.APIKeyVerifier))
+		pub.GET("/indicators", s.handlePublicIndicators)
+		pub.GET("/indicators/:collector_id/:indicator_key/history", s.handlePublicIndicatorHistory)
+	}
 
 	if s.Static != nil {
 		r.NoRoute(serveStatic(s.Static))

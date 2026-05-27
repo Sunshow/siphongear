@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sunshow/siphongear/internal/api"
+	"github.com/sunshow/siphongear/internal/apikey"
 	"github.com/sunshow/siphongear/internal/auth"
 	"github.com/sunshow/siphongear/internal/config"
 	"github.com/sunshow/siphongear/internal/crypto"
@@ -114,6 +115,7 @@ func main() {
 		Scheduler:        sch,
 		TplStore:         templates.NewStore(db),
 		NotifyDispatcher: disp,
+		APIKeyVerifier:   apikey.NewVerifier(db),
 		Static:           staticFS,
 	}
 	router := api.NewRouter(server)

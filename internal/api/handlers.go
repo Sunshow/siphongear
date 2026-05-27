@@ -553,18 +553,40 @@ func parseTags(s string) []string {
 }
 
 func (s *Server) handleDashboard(c *gin.Context) {
-	var indicators []models.Indicator
-	if err := s.DB.
-		Joins("JOIN collectors ON collectors.id = indicators.collector_id AND collectors.deleted_at IS NULL").
-		Where("indicators.hidden = ?", false).
-		Order("indicators.collector_id, indicators.id").
-		Find(&indicators).Error; err != nil {
+	cards, err := s.buildDashboardCards(dashboardFilter{})
+	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	c.JSON(200, cards)
+}
+
+type dashboardFilter struct {
+	CollectorID  uint
+	IndicatorKey string
+	SiteID       uint
+	Tag          string
+}
+
+func (s *Server) buildDashboardCards(filter dashboardFilter) ([]dashboardCard, error) {
+	q := s.DB.
+		Joins("JOIN collectors ON collectors.id = indicators.collector_id AND collectors.deleted_at IS NULL").
+		Where("indicators.hidden = ?", false)
+	if filter.CollectorID != 0 {
+		q = q.Where("indicators.collector_id = ?", filter.CollectorID)
+	}
+	if filter.IndicatorKey != "" {
+		q = q.Where("indicators.key = ?", filter.IndicatorKey)
+	}
+	if filter.SiteID != 0 {
+		q = q.Where("collectors.site_id = ?", filter.SiteID)
+	}
+	var indicators []models.Indicator
+	if err := q.Order("indicators.collector_id, indicators.id").Find(&indicators).Error; err != nil {
+		return nil, err
+	}
 	if len(indicators) == 0 {
-		c.JSON(200, []dashboardCard{})
-		return
+		return []dashboardCard{}, nil
 	}
 	type collInfo struct {
 		Name       string
@@ -634,6 +656,18 @@ func (s *Server) handleDashboard(c *gin.Context) {
 		_ = s.DB.Where("indicator_id = ?", ind.ID).Order("ts desc").Limit(2).Find(&dps).Error
 		ci := collectorMap[ind.CollectorID]
 		si := siteMap[ci.SiteID]
+		if filter.Tag != "" {
+			matched := false
+			for _, t := range si.Tags {
+				if t == filter.Tag {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
 		card := dashboardCard{
 			CollectorID:   ind.CollectorID,
 			CollectorName: ci.Name,
@@ -684,5 +718,5 @@ func (s *Server) handleDashboard(c *gin.Context) {
 		}
 		cards = append(cards, card)
 	}
-	c.JSON(200, cards)
+	return cards, nil
 }

@@ -160,3 +160,16 @@ type RuleNotificationState struct {
 	Matched     bool      `json:"matched"`
 	LastEventAt time.Time `json:"last_event_at"`
 }
+
+type APIKey struct {
+	ID         uint           `gorm:"primaryKey" json:"id"`
+	Name       string         `gorm:"size:128;index" json:"name"`
+	Prefix     string         `gorm:"uniqueIndex;size:16" json:"prefix"`
+	SecretHash string         `gorm:"size:255" json:"-"`
+	Enabled    bool           `gorm:"index" json:"enabled"`
+	LastUsedAt *time.Time     `json:"last_used_at"`
+	Notes      string         `gorm:"type:text" json:"notes"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+}

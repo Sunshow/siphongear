@@ -11,6 +11,7 @@ import Settings from '@/views/Settings.vue'
 import TemplateCenter from '@/views/TemplateCenter.vue'
 import Rules from '@/views/Rules.vue'
 import Notifications from '@/views/Notifications.vue'
+import ApiKeys from '@/views/ApiKeys.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -28,6 +29,7 @@ export const router = createRouter({
     { path: '/templates', name: 'templates', component: TemplateCenter },
     { path: '/rules', name: 'rules', component: Rules },
     { path: '/notifications', name: 'notifications', component: Notifications },
+    { path: '/api-keys', name: 'api-keys', component: ApiKeys },
     { path: '/settings', name: 'settings', component: Settings }
   ]
 })

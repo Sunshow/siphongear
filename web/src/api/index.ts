@@ -90,5 +90,15 @@ export const api = {
       test(id: number, b: any = {}) { return http.post(`/notify/channels/${id}/test`, b).then(r => r.data) }
     },
     logs(params: any = {}) { return http.get('/notify/logs', { params }).then(r => r.data) }
+  },
+
+  apiKeys: {
+    list() { return http.get('/api-keys').then(r => r.data) },
+    create(b: { name: string; notes?: string }) { return http.post('/api-keys', b).then(r => r.data) },
+    update(id: number, b: { name: string; enabled: boolean; notes?: string }) {
+      return http.put(`/api-keys/${id}`, b).then(r => r.data)
+    },
+    remove(id: number) { return http.delete(`/api-keys/${id}`).then(r => r.data) },
+    rotate(id: number) { return http.post(`/api-keys/${id}/rotate`).then(r => r.data) }
   }
 }

@@ -51,6 +51,7 @@ func Migrate(db *gorm.DB) error {
 		&models.NotificationChannel{},
 		&models.NotificationLog{},
 		&models.RuleNotificationState{},
+		&models.APIKey{},
 	)
 }
 

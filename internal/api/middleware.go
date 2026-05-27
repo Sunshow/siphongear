@@ -1,17 +1,21 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/sunshow/siphongear/internal/apikey"
 	"github.com/sunshow/siphongear/internal/auth"
 )
 
 const (
-	ctxUserID   = "uid"
-	ctxUsername = "username"
+	ctxUserID    = "uid"
+	ctxUsername  = "username"
+	ctxAPIKeyID  = "api_key_id"
+	headerAPIKey = "X-API-Key"
 )
 
 func authMiddleware(jwt *auth.JWT) gin.HandlerFunc {
@@ -30,6 +34,31 @@ func authMiddleware(jwt *auth.JWT) gin.HandlerFunc {
 		}
 		c.Set(ctxUserID, claims.UserID)
 		c.Set(ctxUsername, claims.Username)
+		c.Next()
+	}
+}
+
+func apiKeyMiddleware(v *apikey.Verifier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.GetHeader(headerAPIKey)
+		if token == "" {
+			h := c.GetHeader("Authorization")
+			token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		}
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing api key"})
+			return
+		}
+		row, err := v.Verify(token)
+		if err != nil {
+			if errors.Is(err, apikey.ErrDisabled) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "api key disabled"})
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
+			return
+		}
+		c.Set(ctxAPIKeyID, row.ID)
 		c.Next()
 	}
 }
