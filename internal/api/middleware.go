@@ -16,6 +16,7 @@ const (
 	ctxUsername  = "username"
 	ctxAPIKeyID  = "api_key_id"
 	headerAPIKey = "X-API-Key"
+	queryAPIKey  = "api_key"
 )
 
 func authMiddleware(jwt *auth.JWT) gin.HandlerFunc {
@@ -44,6 +45,9 @@ func apiKeyMiddleware(v *apikey.Verifier) gin.HandlerFunc {
 		if token == "" {
 			h := c.GetHeader("Authorization")
 			token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		}
+		if token == "" {
+			token = strings.TrimSpace(c.Query(queryAPIKey))
 		}
 		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing api key"})
