@@ -37,6 +37,22 @@ function parseTags(s: string): string[] {
 
 const dialogTags = computed(() => tagList.value)
 
+const allSiteTags = computed(() => {
+  const tags = new Set<string>()
+  for (const s of rows.value) {
+    for (const t of parseTags(s.tags || '')) tags.add(t)
+  }
+  return [...tags].sort()
+})
+
+const suggestedTagsRemaining = computed(() =>
+  allSiteTags.value.filter(t => !tagList.value.includes(t))
+)
+
+function pickTag(t: string) {
+  if (!tagList.value.includes(t)) tagList.value.push(t)
+}
+
 async function reload() { rows.value = await api.sites.list() }
 
 function openCreate() {
@@ -161,6 +177,17 @@ onMounted(reload)
             />
             <el-button v-else size="small" plain @click="showTagInput">+ Tag</el-button>
           </div>
+          <div v-if="suggestedTagsRemaining.length" class="tag-hints">
+            <span class="form-hint">Existing tags:</span>
+            <el-tag
+              v-for="t in suggestedTagsRemaining"
+              :key="t"
+              size="small"
+              effect="plain"
+              class="tag-hint-item"
+              @click="pickTag(t)"
+            >+ {{ t }}</el-tag>
+          </div>
         </el-form-item>
         <el-form-item label="Notes"><el-input v-model="form.notes" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -192,5 +219,19 @@ onMounted(reload)
 }
 .tag-editor-input {
   width: 120px;
+}
+.tag-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+.tag-hint-item {
+  cursor: pointer;
+}
+.form-hint {
+  color: var(--sg-text-muted);
+  font-size: 12px;
 }
 </style>
