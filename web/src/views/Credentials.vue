@@ -96,6 +96,20 @@ async function openEdit(row: any) {
   form.type = row.type
   resetFields()
   dialog.value = true
+  try {
+    const full = await api.credentials.get(row.id)
+    if (full.payload) {
+      if (isCustom.value) {
+        customPayload.value = JSON.stringify(full.payload, null, 2)
+      } else {
+        for (const f of fieldsForType.value) {
+          if (full.payload[f.name] !== undefined) {
+            fieldsData[f.name] = String(full.payload[f.name])
+          }
+        }
+      }
+    }
+  } catch { /* ignore */ }
 }
 
 async function remove(row: any) {
@@ -163,10 +177,6 @@ onMounted(reload)
             />
           </el-form-item>
         </template>
-
-        <el-alert v-if="form.id" type="warning" show-icon :closable="false">
-          For security, existing values are never shown. Submit replaces them.
-        </el-alert>
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">Cancel</el-button>

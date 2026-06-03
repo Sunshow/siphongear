@@ -210,7 +210,24 @@ func (s *Server) getCredential(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
-	c.JSON(200, row)
+	resp := gin.H{
+		"id":         row.ID,
+		"site_id":    row.SiteID,
+		"name":       row.Name,
+		"type":       row.Type,
+		"created_at": row.CreatedAt,
+		"updated_at": row.UpdatedAt,
+	}
+	if row.Payload != "" {
+		plain, err := s.Cipher.DecryptString(row.Payload)
+		if err == nil {
+			var payload map[string]any
+			if sonic.UnmarshalString(plain, &payload) == nil {
+				resp["payload"] = payload
+			}
+		}
+	}
+	c.JSON(200, resp)
 }
 
 func (s *Server) updateCredential(c *gin.Context) {
