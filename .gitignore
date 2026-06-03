@@ -22,3 +22,5 @@ web/dist/*
 !web/dist/.gitkeep
 .DS_Store
 .env
+
+.playwright-mcp/

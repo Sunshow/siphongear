@@ -443,4 +443,78 @@ return { vars: { balance_gb: (n + p + t) / 1e9 } };`,
 			{Key: "ip_balance", Name: "IP余额", Type: "number", Display: "line"},
 		},
 	})
+
+	Register(Template{
+		Name:            "gpt2image-balance",
+		Description:     "GPT2IMAGE 积分查询：邮箱+密码登录 → 从 Dashboard HTML 提取可用积分（Credits Balance）",
+		NeedsCredential: true,
+		CredentialHint: &TemplateCredentialHint{
+			Type: "password",
+			Fields: []TemplateCredentialField{
+				{Name: "email", Label: "Email", Type: "text", Required: true, Placeholder: "user@example.com"},
+				{Name: "password", Label: "Password", Type: "password", Required: true},
+			},
+		},
+		ScheduleType: "interval",
+		ScheduleSpec: "30m",
+		Timeout:      30,
+		Variables: []TemplateVariable{
+			{Name: "base_url", Label: "Base URL", Default: "https://gpt2image.superapi.buzz", Placeholder: "https://gpt2image.superapi.buzz", Required: true},
+		},
+		Pipeline: pipeline.Definition{
+			Steps: []pipeline.StepConfig{
+				{Kind: "input.credential", Name: "load credential",
+					Config: map[string]any{
+						"credential_id": 0,
+						"var_name":      "cred",
+					}},
+				{Kind: "fetch.http", Name: "login",
+					Config: map[string]any{
+						"method":  "POST",
+						"url":     "{{BASE_URL}}/api/auth/sign-in/email",
+						"headers": map[string]any{"Content-Type": "application/json"},
+						"body":    `{"email":"{{.vars.cred.email}}","password":"{{.vars.cred.password}}","callbackURL":"/dashboard"}`,
+						"timeout":         15,
+						"save_headers_as": "login_headers",
+					}},
+				{Kind: "script.js.extract", Name: "extract session cookie",
+					Config: map[string]any{
+						"source": `var h = payload.vars.login_headers || {};
+var raw = h["Set-Cookie"] || h["set-cookie"];
+if (Array.isArray(raw)) raw = raw.join("; ");
+raw = raw || "";
+var m = raw.match(/__Secure-better-auth\.session_token=([^;]+)/);
+if (!m) throw new Error("session_token cookie not found in login response");
+return { vars: { session_token: m[1] } };`,
+						"timeout_ms": 2000,
+					}},
+				{Kind: "fetch.http", Name: "fetch dashboard",
+					Config: map[string]any{
+						"method": "GET",
+						"url":    "{{BASE_URL}}/en/dashboard",
+						"headers": map[string]any{
+							"Cookie": "__Secure-better-auth.session_token={{.vars.session_token}}",
+							"Accept": "text/html,application/xhtml+xml",
+						},
+						"timeout":      15,
+						"save_body_as": "dashboard_html",
+					}},
+				{Kind: "script.js.extract", Name: "extract balance",
+					Config: map[string]any{
+						"source": `var html = payload.vars.dashboard_html || "";
+var m = html.match(/Credits Balance[\s\S]*?text-2xl font-bold[^>]*>([\d,]+)</);
+if (!m) throw new Error("balance not found in dashboard HTML");
+var balance = Number(m[1].replace(/,/g, ''));
+return { vars: { balance: balance } };`,
+						"timeout_ms": 2000,
+					}},
+			},
+			Indicators: []pipeline.IndicatorBind{
+				{Key: "balance"},
+			},
+		},
+		Indicators: []TemplateIndicator{
+			{Key: "balance", Name: "积分", Type: "number", Display: "line"},
+		},
+	})
 }

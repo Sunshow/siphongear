@@ -224,6 +224,7 @@ UI 表单字段从 `GET /api/v1/registry/steps` 元数据自动渲染（`StepEdi
 | `newapi-balance` | [QuantumNous/new-api](https://github.com/QuantumNous/new-api) cookie session 登录 | Username + Password | interval 30m |
 | `newapi-balance-accesstoken` | NewAPI 访问令牌直取，免登录 | Access Token + User ID | interval 30m |
 | `rixapi-balance-accesstoken` | RixAPI / NewAPI 商业分支 | Access Token + User ID | interval 30m |
+| `gpt2image-balance` | GPT2IMAGE 积分查询：邮箱+密码登录，从 Dashboard HTML 提取积分 | Email + Password | interval 30m |
 
 模板源码：`internal/templates/builtin.go`。运行时也能 `GET /api/v1/templates` 拿全量定义。
 
