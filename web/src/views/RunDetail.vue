@@ -11,11 +11,28 @@ const id = computed(() => Number(route.params.id))
 
 const run = ref<any>(null)
 const logs = ref<any[]>([])
+const datapoints = ref<any[]>([])
+const indicators = ref<any[]>([])
+
+const indicatorName = computed<Record<number, string>>(() => {
+  const m: Record<number, string> = {}
+  for (const i of indicators.value) m[i.id] = i.name || i.key
+  return m
+})
+
+function dpDisplay(row: any): string {
+  if (row.value_num !== null && row.value_num !== undefined) return String(row.value_num)
+  if (row.value_str !== null && row.value_str !== undefined) return row.value_str
+  if (row.value_json !== null && row.value_json !== undefined) return String(row.value_json)
+  return '—'
+}
 
 async function load() {
   const res = await api.runs.get(id.value)
   run.value = res.run
   logs.value = res.step_logs || []
+  datapoints.value = res.data_points || []
+  indicators.value = res.indicators || []
 }
 
 onMounted(load)
@@ -43,6 +60,15 @@ onMounted(load)
       <el-descriptions-item v-if="run.error" label="Error">{{ run.error }}</el-descriptions-item>
     </el-descriptions>
 
+    <h3 style="margin-top: 24px">Data Points</h3>
+    <div v-if="datapoints.length" class="dp-list">
+      <div v-for="dp in datapoints" :key="dp.id" class="dp-item">
+        <span class="dp-name">{{ indicatorName[dp.indicator_id] || dp.indicator_id }}</span>
+        <span class="dp-value">{{ dpDisplay(dp) }}</span>
+      </div>
+    </div>
+    <el-empty v-else description="No data points" :image-size="60" />
+
     <h3 style="margin-top: 24px">Steps</h3>
     <el-timeline>
       <el-timeline-item v-for="s in logs" :key="s.id" :type="s.error ? 'danger' : 'success'" :timestamp="`#${s.index} · ${s.kind} · ${s.duration_ms} ms`">
@@ -64,4 +90,29 @@ onMounted(load)
   font-size: 12px;
 }
 .err { color: var(--el-color-danger); font-weight: 500; }
+.dp-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dp-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--sg-bg-card);
+  border: 1px solid var(--sg-border-soft);
+  border-radius: var(--sg-radius);
+  padding: 8px 12px;
+  min-width: 120px;
+}
+.dp-name {
+  font-size: 12px;
+  color: var(--sg-text-secondary);
+}
+.dp-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--sg-text-primary);
+  word-break: break-all;
+}
 </style>

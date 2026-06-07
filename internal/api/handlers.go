@@ -450,7 +450,17 @@ func (s *Server) getRun(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"run": run, "step_logs": logs})
+	var dps []models.DataPoint
+	if err := s.DB.Where("run_id = ?", run.ID).Order("indicator_id asc").Find(&dps).Error; err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	var indicators []models.Indicator
+	if err := s.DB.Where("collector_id = ?", run.CollectorID).Order("id asc").Find(&indicators).Error; err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"run": run, "step_logs": logs, "data_points": dps, "indicators": indicators})
 }
 
 func (s *Server) listDataPoints(c *gin.Context) {
@@ -458,6 +468,9 @@ func (s *Server) listDataPoints(c *gin.Context) {
 	q := s.DB.Where("collector_id = ?", c.Param("id"))
 	if ind := c.Query("indicator_id"); ind != "" {
 		q = q.Where("indicator_id = ?", ind)
+	}
+	if rid := c.Query("run_id"); rid != "" {
+		q = q.Where("run_id = ?", rid)
 	}
 	if from := c.Query("from"); from != "" {
 		if t, err := time.Parse(time.RFC3339, from); err == nil {

@@ -12,6 +12,20 @@ const runs = ref<any[]>([])
 const indicators = ref<any[]>([])
 const datapoints = ref<any[]>([])
 const selected = ref<number | null>(null)
+const runDataPoints = ref<Record<number, any[]>>({})
+
+const indicatorName = computed<Record<number, string>>(() => {
+  const m: Record<number, string> = {}
+  for (const i of indicators.value) m[i.id] = i.name || i.key
+  return m
+})
+
+function dpDisplay(row: any): string {
+  if (row.value_num !== null && row.value_num !== undefined) return String(row.value_num)
+  if (row.value_str !== null && row.value_str !== undefined) return row.value_str
+  if (row.value_json !== null && row.value_json !== undefined) return String(row.value_json)
+  return '—'
+}
 
 const runColumns: RTColumn[] = [
   { key: 'id', label: 'ID', width: 80, primary: true },
@@ -19,6 +33,7 @@ const runColumns: RTColumn[] = [
   { key: 'trigger', label: 'Trigger', width: 120 },
   { key: 'started', label: 'Started', slot: 'started' },
   { key: 'duration', label: 'Duration', slot: 'duration', width: 120 },
+  { key: 'datapoints', label: 'Data Points', slot: 'datapoints' },
   { key: 'error', label: 'Error' }
 ]
 
@@ -33,10 +48,21 @@ async function reload() {
     api.collectors.runs(id.value, 100),
     api.indicators.list(id.value)
   ])
+  await loadRunDataPoints()
   if (indicators.value.length && !selected.value) {
     selected.value = indicators.value[0].id
     await loadDP()
   }
+}
+
+async function loadRunDataPoints() {
+  const all: any[] = await api.collectors.datapoints(id.value, { limit: 2000 })
+  const grouped: Record<number, any[]> = {}
+  for (const dp of all) {
+    if (!grouped[dp.run_id]) grouped[dp.run_id] = []
+    grouped[dp.run_id].push(dp)
+  }
+  runDataPoints.value = grouped
 }
 
 async function loadDP() {
@@ -76,6 +102,20 @@ onMounted(reload)
           </template>
           <template #started="{ row }">{{ new Date(row.started_at).toLocaleString() }}</template>
           <template #duration="{ row }">{{ row.duration_ms }} ms</template>
+          <template #datapoints="{ row }">
+            <div v-if="runDataPoints[row.id]?.length" class="dp-chips">
+              <el-tag
+                v-for="dp in runDataPoints[row.id]"
+                :key="dp.id"
+                size="small"
+                type="info"
+                effect="plain"
+              >
+                {{ indicatorName[dp.indicator_id] || dp.indicator_id }}: {{ dpDisplay(dp) }}
+              </el-tag>
+            </div>
+            <span v-else class="dp-empty">—</span>
+          </template>
         </ResponsiveTable>
       </el-tab-pane>
 
@@ -99,3 +139,14 @@ onMounted(reload)
     </el-tabs>
   </div>
 </template>
+
+<style scoped>
+.dp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dp-empty {
+  color: var(--sg-text-secondary);
+}
+</style>
