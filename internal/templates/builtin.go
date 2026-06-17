@@ -502,19 +502,23 @@ return { vars: { session_token: m[1] } };`,
 				{Kind: "script.js.extract", Name: "extract balance",
 					Config: map[string]any{
 						"source": `var html = payload.vars.dashboard_html || "";
-var m = html.match(/Credits Balance[\s\S]*?text-2xl font-bold[^>]*>([\d,]+)</);
+var m = html.match(/Credits Balance[\s\S]*?card-content[\s\S]*?text-2xl font-bold[^>]*>([\d,]+(?:\.[\d]+)?)</);
 if (!m) throw new Error("balance not found in dashboard HTML");
 var balance = Number(m[1].replace(/,/g, ''));
-return { vars: { balance: balance } };`,
+var m2 = html.match(/Images Generated[\s\S]*?card-content[\s\S]*?text-2xl font-bold[^>]*>([\d,]+)</);
+var images = m2 ? Number(m2[1].replace(/,/g, '')) : 0;
+return { vars: { balance: balance, images_generated: images } };`,
 						"timeout_ms": 2000,
 					}},
 			},
 			Indicators: []pipeline.IndicatorBind{
 				{Key: "balance"},
+				{Key: "images_generated"},
 			},
 		},
 		Indicators: []TemplateIndicator{
 			{Key: "balance", Name: "积分", Type: "number", Display: "line"},
+			{Key: "images_generated", Name: "已生图", Type: "number", Display: "line"},
 		},
 	})
 }
