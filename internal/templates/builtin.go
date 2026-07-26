@@ -502,12 +502,15 @@ return { vars: { session_token: m[1] } };`,
 				{Kind: "script.js.extract", Name: "extract balance",
 					Config: map[string]any{
 						"source": `var html = payload.vars.dashboard_html || "";
-var m = html.match(/Credits Balance[\s\S]*?data-slot="card-content"[^>]*>[\s\S]*?>([\d,]+(?:\.[\d]+)?)</)
-  || html.match(/Credits Balance[\s\S]{0,2000}?>([\d,]+(?:\.[\d]+)?)</);
+// Anchor on real DOM labels ("...</div>"), not marketing copy / RSC JSON that also contains these strings.
+var m = html.match(/Credits Balance<\/div>[\s\S]*?data-slot="card-content"[^>]*>[\s\S]*?>([\d,]+(?:\.[\d]+)?)</)
+  || html.match(/Credits Balance<\/div>[\s\S]*?font-serif text-3xl[^>]*>([\d,]+(?:\.[\d]+)?)</)
+  || html.match(/Credits Balance<\/div>[\s\S]{0,2000}?>([\d,]+(?:\.[\d]+)?)</);
 if (!m) throw new Error("balance not found in dashboard HTML");
 var balance = Number(m[1].replace(/,/g, ''));
-var m2 = html.match(/Images Generated[\s\S]*?data-slot="card-content"[^>]*>[\s\S]*?>([\d,]+)/)
-  || html.match(/Images Generated[\s\S]{0,2000}?>([\d,]+)/);
+var m2 = html.match(/Images Generated<\/div>[\s\S]*?data-slot="card-content"[^>]*>[\s\S]*?>([\d,]+)</)
+  || html.match(/Images Generated<\/div>[\s\S]*?font-serif text-3xl[^>]*>([\d,]+)</)
+  || html.match(/Images Generated<\/div>[\s\S]{0,2000}?>([\d,]+)</);
 var images = m2 ? Number(m2[1].replace(/,/g, '')) : 0;
 return { vars: { balance: balance, images_generated: images } };`,
 						"timeout_ms": 2000,
