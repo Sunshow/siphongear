@@ -17,6 +17,10 @@ import (
 	"github.com/sunshow/siphongear/internal/templates"
 )
 
+type CollectorCleanupQueue interface {
+	Enqueue(uint)
+}
+
 type Server struct {
 	DB               *gorm.DB
 	JWT              *auth.JWT
@@ -26,6 +30,7 @@ type Server struct {
 	TplStore         *templates.Store
 	NotifyDispatcher *notify.Dispatcher
 	APIKeyVerifier   *apikey.Verifier
+	CollectorCleaner CollectorCleanupQueue
 	Static           fs.FS // embedded web/dist
 }
 

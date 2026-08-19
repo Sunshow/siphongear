@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -359,29 +360,34 @@ func (s *Server) updateCollector(c *gin.Context) {
 }
 
 func (s *Server) deleteCollector(c *gin.Context) {
-	id := c.Param("id")
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("run_id IN (?)",
-			tx.Model(&models.Run{}).Select("id").Where("collector_id = ?", id),
-		).Delete(&models.StepLog{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("collector_id = ?", id).Delete(&models.Run{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("collector_id = ?", id).Delete(&models.DataPoint{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("collector_id = ?", id).Delete(&models.Indicator{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&models.Collector{}, id).Error
-	})
-	if err != nil {
+	id64, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id64 == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collector id"})
+		return
+	}
+	id := uint(id64)
+
+	var row models.Collector
+	err = s.DB.WithContext(c.Request.Context()).
+		Unscoped().
+		Select("id", "deleted_at").
+		First(&row, id).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	_ = s.Scheduler.Reload()
+	if err == nil && !row.DeletedAt.Valid {
+		if err := s.DB.WithContext(c.Request.Context()).Delete(&row).Error; err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		if s.Scheduler != nil {
+			_ = s.Scheduler.Reload()
+		}
+	}
+	if s.CollectorCleaner != nil {
+		s.CollectorCleaner.Enqueue(id)
+	}
 	c.JSON(200, gin.H{"ok": true})
 }
 

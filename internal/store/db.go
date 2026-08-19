@@ -59,13 +59,21 @@ func Migrate(db *gorm.DB) error {
 // (or has been soft-deleted). Idempotent; safe to run on every startup.
 func PruneOrphans(db *gorm.DB) error {
 	stmts := []string{
-		`DELETE FROM indicators WHERE collector_id NOT IN (
+		`DELETE FROM rule_notification_states WHERE indicator_id NOT IN (
+			SELECT id FROM indicators) OR indicator_id IN (
+			SELECT id FROM indicators WHERE collector_id NOT IN (
+				SELECT id FROM collectors WHERE deleted_at IS NULL))`,
+		`DELETE FROM data_points WHERE indicator_id NOT IN (
+			SELECT id FROM indicators) OR collector_id NOT IN (
 			SELECT id FROM collectors WHERE deleted_at IS NULL)`,
-		`DELETE FROM data_points WHERE indicator_id NOT IN (SELECT id FROM indicators)`,
-		`DELETE FROM step_logs WHERE run_id NOT IN (SELECT id FROM runs)`,
+		`DELETE FROM step_logs WHERE run_id NOT IN (
+			SELECT id FROM runs) OR run_id IN (
+			SELECT id FROM runs WHERE collector_id NOT IN (
+				SELECT id FROM collectors WHERE deleted_at IS NULL))`,
 		`DELETE FROM runs WHERE collector_id NOT IN (
 			SELECT id FROM collectors WHERE deleted_at IS NULL)`,
-		`DELETE FROM rule_notification_states WHERE indicator_id NOT IN (SELECT id FROM indicators)`,
+		`DELETE FROM indicators WHERE collector_id NOT IN (
+			SELECT id FROM collectors WHERE deleted_at IS NULL)`,
 		`DELETE FROM rule_notification_states WHERE rule_id NOT IN (
 			SELECT id FROM threshold_rules WHERE deleted_at IS NULL)`,
 		`DELETE FROM notification_logs WHERE channel_id NOT IN (

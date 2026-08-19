@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
@@ -10,6 +10,7 @@ const router = useRouter()
 const rows = ref<any[]>([])
 const sites = ref<any[]>([])
 const loading = ref(false)
+const deletingIds = reactive(new Set<number>())
 
 const saveTplVisible = ref(false)
 const saveTplCollector = ref<any>(null)
@@ -49,9 +50,30 @@ async function trigger(row: any) {
 }
 
 async function remove(row: any) {
-  await ElMessageBox.confirm(`Delete collector "${row.name}"?`, 'Confirm')
-  await api.collectors.remove(row.id)
-  await reload()
+  if (deletingIds.has(row.id)) return
+  try {
+    await ElMessageBox.confirm(`Delete collector "${row.name}"?`, 'Confirm')
+  } catch {
+    return
+  }
+
+  deletingIds.add(row.id)
+  try {
+    await api.collectors.remove(row.id)
+    rows.value = rows.value.filter(item => item.id !== row.id)
+    ElMessage.success(`collector "${row.name}" deleted`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || e?.message || 'delete failed')
+    return
+  } finally {
+    deletingIds.delete(row.id)
+  }
+
+  try {
+    await reload()
+  } catch (e: any) {
+    ElMessage.warning(e?.response?.data?.error || 'deleted, but refresh failed')
+  }
 }
 
 function gotoNew() { router.push({ name: 'collector-new' }) }
@@ -100,7 +122,13 @@ onMounted(reload)
         <el-button link @click="gotoEdit(row)">Edit</el-button>
         <el-button link @click="gotoRuns(row)">Runs</el-button>
         <el-button link @click="openSaveAsTemplate(row)">Save as Template</el-button>
-        <el-button link type="danger" @click="remove(row)">Delete</el-button>
+        <el-button
+          link
+          type="danger"
+          :loading="deletingIds.has(row.id)"
+          :disabled="deletingIds.has(row.id)"
+          @click="remove(row)"
+        >Delete</el-button>
       </template>
     </ResponsiveTable>
 

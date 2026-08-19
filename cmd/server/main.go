@@ -93,6 +93,7 @@ func main() {
 	r := runner.New(db, cipher, bus, cfg.Runner.MaxConcurrency)
 	sch := scheduler.New(db, r, bus)
 	disp := notify.NewDispatcher(db, cipher, bus)
+	cleaner := store.NewCollectorCleaner(db, r)
 
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -101,6 +102,7 @@ func main() {
 		os.Exit(1)
 	}
 	disp.Start(rootCtx)
+	cleaner.Start(rootCtx)
 
 	staticFS, err := web.Dist()
 	if err != nil {
@@ -116,6 +118,7 @@ func main() {
 		TplStore:         templates.NewStore(db),
 		NotifyDispatcher: disp,
 		APIKeyVerifier:   apikey.NewVerifier(db),
+		CollectorCleaner: cleaner,
 		Static:           staticFS,
 	}
 	router := api.NewRouter(server)
@@ -144,4 +147,7 @@ func main() {
 	defer shutCancel()
 	_ = httpSrv.Shutdown(shutCtx)
 	sch.Stop()
+	cancel()
+	cleaner.Wait()
+	disp.Wait()
 }

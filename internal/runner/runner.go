@@ -23,7 +23,7 @@ type Runner struct {
 	bus    *events.Bus
 	sem    chan struct{}
 	mu     sync.Mutex
-	active map[uint]bool
+	active map[uint]chan struct{}
 }
 
 func New(db *gorm.DB, cipher *crypto.Cipher, bus *events.Bus, maxConcurrency int) *Runner {
@@ -35,7 +35,7 @@ func New(db *gorm.DB, cipher *crypto.Cipher, bus *events.Bus, maxConcurrency int
 		cipher: cipher,
 		bus:    bus,
 		sem:    make(chan struct{}, maxConcurrency),
-		active: map[uint]bool{},
+		active: map[uint]chan struct{}{},
 	}
 }
 
@@ -98,15 +98,17 @@ type RunResult struct {
 // Trigger runs a collector by ID.
 func (r *Runner) Trigger(ctx context.Context, collectorID uint, trigger string, params map[string]any, dryRun bool) (*RunResult, error) {
 	r.mu.Lock()
-	if r.active[collectorID] {
+	if _, running := r.active[collectorID]; running {
 		r.mu.Unlock()
 		return nil, fmt.Errorf("collector %d is already running", collectorID)
 	}
-	r.active[collectorID] = true
+	done := make(chan struct{})
+	r.active[collectorID] = done
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		delete(r.active, collectorID)
+		close(done)
 		r.mu.Unlock()
 	}()
 
@@ -205,6 +207,23 @@ func (r *Runner) Trigger(ctx context.Context, collectorID uint, trigger string, 
 		}
 	}
 	return out, runErr
+}
+
+// WaitInactive waits for a currently running Collector to finish. A Collector
+// that is not active returns immediately.
+func (r *Runner) WaitInactive(ctx context.Context, collectorID uint) error {
+	r.mu.Lock()
+	done, running := r.active[collectorID]
+	r.mu.Unlock()
+	if !running {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return nil
+	}
 }
 
 func (r *Runner) persistDataPoints(collectorID uint, runID uint64, ts time.Time, indicators map[string]any) {
