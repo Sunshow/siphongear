@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/knadh/koanf/parsers/yaml"
@@ -16,6 +17,7 @@ type Config struct {
 	Log      LogConfig      `koanf:"log"`
 	Browser  BrowserConfig  `koanf:"browser"`
 	Runner   RunnerConfig   `koanf:"runner"`
+	History  HistoryConfig  `koanf:"history"`
 }
 
 type ServerConfig struct {
@@ -30,7 +32,7 @@ type DatabaseConfig struct {
 
 type AuthConfig struct {
 	JWTSecret    string `koanf:"jwt_secret"`
-	MasterKey    string `koanf:"master_key"`     // 32 bytes hex/base64
+	MasterKey    string `koanf:"master_key"` // 32 bytes hex/base64
 	InitUsername string `koanf:"init_username"`
 	InitPassword string `koanf:"init_password"`
 	TokenTTLHrs  int    `koanf:"token_ttl_hrs"`
@@ -48,6 +50,10 @@ type BrowserConfig struct {
 type RunnerConfig struct {
 	MaxConcurrency int `koanf:"max_concurrency"`
 	DefaultTimeout int `koanf:"default_timeout"` // seconds
+}
+
+type HistoryConfig struct {
+	RetentionDays int `koanf:"retention_days"`
 }
 
 func Load(path string) (*Config, error) {
@@ -68,11 +74,14 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
-	cfg := &Config{}
+	cfg := &Config{History: HistoryConfig{RetentionDays: 7}}
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, err
 	}
 	setDefaults(cfg)
+	if cfg.History.RetentionDays <= 0 {
+		return nil, fmt.Errorf("history.retention_days must be a positive integer")
+	}
 	return cfg, nil
 }
 

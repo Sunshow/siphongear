@@ -101,7 +101,7 @@ rm -rf data/      # 整个 SQLite + 历史
 
 ## 已知限制
 
-- 前端没有专门的指标历史曲线图（数据已落 `data_points` 表，只展示在 CollectorRuns 的 Data Points tab）
+- 前端没有专门的指标历史曲线图（数据已落 `data_points` 表，在 Collector History 中随 Run 展示，支持日期筛选和分页）
 - 单二进制单实例，多实例需引入分布式锁
 - 浏览器 step 在 macOS 默认会拉本机 Chrome，远程模式通过 `BROWSER_WS_URL` 接 chrome:devtools
 

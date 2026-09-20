@@ -36,6 +36,7 @@
 - **多通道告警通知**：规则可挂多个通知实例，仅在 OK→alert / alert→OK 翻转时推送，避免刷屏；首期内置 ServerChan，类型可扩展；title / body 支持 Go `text/template` 自定义，留空走默认
 - **Dashboard 自动刷新**：默认 30s 一次，可关，间隔可调（10/30/60/120/300s），一键「全部触发一次」
 - **指标历史曲线**：每个指标都有时序数据，可查询 / 画图
+- **History**：每行合并一次 Run 与对应的 Data Points，按开始时间从新到旧排列；支持本地日期范围、指标筛选和分页，点击可查看步骤详情
 - **Dry Run**：不写库试跑流水线，立即查看每个 Step 的输出片段
 - **Save as Template**：把调好的 Collector 一键存成自己的模板复用
 - **凭证 AES-GCM 加密**：永远不在 API 回写明文，运行时仅注入到 header / body
@@ -313,7 +314,12 @@ browser:
 runner:
   max_concurrency: 4      # 同时跑多少 collector
   default_timeout: 60     # 单次 run 全局超时（秒），collector 自身 timeout 优先
+
+history:
+  retention_days: 7       # 历史保留天数，必须为正整数；环境变量 SIPHON_HISTORY__RETENTION_DAYS
 ```
+
+历史清理在启动后执行一次，之后每小时执行一次，默认保留最近 7 天（每一天按 24 小时计）。过期且已结束的 Run、对应 Step Logs / Data Points，以及过期通知日志会分批永久删除；正在运行或在保留期内才结束的任务会保留。Collector、Indicator 等配置和告警状态不受影响。修改 `history.retention_days` 或环境变量后重启生效；Docker Compose 可直接在 `.env` 设置 `SIPHON_HISTORY__RETENTION_DAYS`。
 
 > ⚠️ `master_key` 一旦换了，旧凭证就解不出来了，**别在生产上随便改**。
 
@@ -356,8 +362,8 @@ CRUD   /collectors
 
 POST   /collectors/:id/run                 同步触发一次，返回结果
 POST   /collectors/:id/dryrun              试跑（不写库），返回每步日志
-GET    /collectors/:id/runs?limit=50
-GET    /collectors/:id/datapoints?indicator_id=&from=&to=&limit=
+GET    /collectors/:id/runs?limit=50&offset=0&from=&to=&indicator_id=
+GET    /collectors/:id/datapoints?indicator_id=&from=&to=&limit=&offset=
 GET    /collectors/:id/indicators
 POST   /collectors/:id/indicators
 PUT    /indicators/:id
@@ -374,6 +380,8 @@ CRUD   /notify/channels                    通知实例，payload AES-GCM 加密
 POST   /notify/channels/:id/test           试发
 GET    /notify/logs?channel_id=&rule_id=&collector_id=&limit=
 ```
+
+Runs 接口仍返回数组，每项包含 `data_points`；响应头 `X-Total-Count` 为筛选后总数。Runs 的 `limit` 范围为 1–200，Data Points 为 1–5000；`offset` 从 0 开始。面板这两个历史接口均按时间降序（同时间按 ID 降序），`from` / `to` 为带时区的 RFC3339 时间，采用左闭右开 `[from, to)`；按日期查询时 `to` 应传结束日期的次日零点。公开 API 的历史接口保持原有行为。
 
 ---
 
@@ -474,7 +482,7 @@ make clean       # 清掉 bin/ web/dist/ data/
 
 ## 已知限制
 
-- 没有专门的指标历史曲线大图页（数据已落 `data_points`，目前在 CollectorRuns 的 Data Points tab 展示）
+- 没有专门的指标历史曲线大图页（数据已落 `data_points`，目前在 Collector History 中随 Run 展示）
 - 单二进制单实例，多实例需引入分布式锁
 - `fetch.browser` 在 macOS 默认拉本机 Chrome；远程模式通过 `BROWSER_WS_URL` 接 chrome:devtools
 

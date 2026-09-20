@@ -23,3 +23,6 @@ browser:
 runner:
   max_concurrency: 4
   default_timeout: 60
+
+history:
+  retention_days: 7  # Positive integer; cleanup runs at startup and every hour

@@ -7,9 +7,9 @@ import (
 )
 
 type User struct {
-	ID           uint   `gorm:"primaryKey" json:"id"`
-	Username     string `gorm:"uniqueIndex;size:64" json:"username"`
-	PasswordHash string `gorm:"size:255" json:"-"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Username     string    `gorm:"uniqueIndex;size:64" json:"username"`
+	PasswordHash string    `gorm:"size:255" json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -69,10 +69,10 @@ type Indicator struct {
 
 type Run struct {
 	ID          uint64     `gorm:"primaryKey" json:"id"`
-	CollectorID uint       `gorm:"index" json:"collector_id"`
+	CollectorID uint       `gorm:"index;index:idx_runs_collector_started,priority:1" json:"collector_id"`
 	Trigger     string     `gorm:"size:16" json:"trigger"`
 	Status      string     `gorm:"size:16;index" json:"status"`
-	StartedAt   time.Time  `json:"started_at"`
+	StartedAt   time.Time  `gorm:"index;index:idx_runs_collector_started,priority:2" json:"started_at"`
 	FinishedAt  *time.Time `json:"finished_at"`
 	DurationMS  int64      `json:"duration_ms"`
 	Error       string     `gorm:"type:text" json:"error"`

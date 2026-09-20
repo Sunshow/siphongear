@@ -435,16 +435,6 @@ func (s *Server) dryRunCollector(c *gin.Context) {
 	})
 }
 
-func (s *Server) listRuns(c *gin.Context) {
-	var rows []models.Run
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	if err := s.DB.Where("collector_id = ?", c.Param("id")).Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(200, rows)
-}
-
 func (s *Server) getRun(c *gin.Context) {
 	var run models.Run
 	if err := s.DB.First(&run, c.Param("id")).Error; err != nil {
@@ -467,33 +457,6 @@ func (s *Server) getRun(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"run": run, "step_logs": logs, "data_points": dps, "indicators": indicators})
-}
-
-func (s *Server) listDataPoints(c *gin.Context) {
-	var rows []models.DataPoint
-	q := s.DB.Where("collector_id = ?", c.Param("id"))
-	if ind := c.Query("indicator_id"); ind != "" {
-		q = q.Where("indicator_id = ?", ind)
-	}
-	if rid := c.Query("run_id"); rid != "" {
-		q = q.Where("run_id = ?", rid)
-	}
-	if from := c.Query("from"); from != "" {
-		if t, err := time.Parse(time.RFC3339, from); err == nil {
-			q = q.Where("ts >= ?", t)
-		}
-	}
-	if to := c.Query("to"); to != "" {
-		if t, err := time.Parse(time.RFC3339, to); err == nil {
-			q = q.Where("ts <= ?", t)
-		}
-	}
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "500"))
-	if err := q.Order("ts asc").Limit(limit).Find(&rows).Error; err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(200, rows)
 }
 
 // ---- indicators ----
@@ -555,21 +518,21 @@ func (s *Server) deleteIndicator(c *gin.Context) {
 // ---- dashboard ----
 
 type dashboardCard struct {
-	CollectorID   uint       `json:"collector_id"`
-	CollectorName string     `json:"collector_name"`
-	SiteID        uint       `json:"site_id"`
-	SiteName      string     `json:"site_name"`
-	SiteBaseURL   string     `json:"site_base_url"`
-	IndicatorID   uint       `json:"indicator_id"`
-	Key           string     `json:"key"`
-	Name          string     `json:"name"`
-	Type          string     `json:"type"`
-	Unit          string     `json:"unit"`
-	Display       string     `json:"display"`
-	ValueNum      *float64   `json:"value_num"`
-	ValueStr      *string    `json:"value_str"`
-	ValueJSON     *string    `json:"value_json"`
-	Ts            *time.Time `json:"ts"`
+	CollectorID   uint         `json:"collector_id"`
+	CollectorName string       `json:"collector_name"`
+	SiteID        uint         `json:"site_id"`
+	SiteName      string       `json:"site_name"`
+	SiteBaseURL   string       `json:"site_base_url"`
+	IndicatorID   uint         `json:"indicator_id"`
+	Key           string       `json:"key"`
+	Name          string       `json:"name"`
+	Type          string       `json:"type"`
+	Unit          string       `json:"unit"`
+	Display       string       `json:"display"`
+	ValueNum      *float64     `json:"value_num"`
+	ValueStr      *string      `json:"value_str"`
+	ValueJSON     *string      `json:"value_json"`
+	Ts            *time.Time   `json:"ts"`
 	PrevValueNum  *float64     `json:"prev_value_num"`
 	PrevValueStr  *string      `json:"prev_value_str"`
 	PrevValueJSON *string      `json:"prev_value_json"`

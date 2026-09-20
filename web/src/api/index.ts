@@ -58,6 +58,12 @@ export const api = {
     run(id: number, params: any = {}) { return http.post(`/collectors/${id}/run`, { params }).then(r => r.data) },
     dryrun(id: number, params: any = {}) { return http.post(`/collectors/${id}/dryrun`, { params }).then(r => r.data) },
     runs(id: number, limit = 50) { return http.get(`/collectors/${id}/runs`, { params: { limit } }).then(r => r.data) },
+    history(id: number, params: { limit?: number; offset?: number; from?: string; to?: string; indicator_id?: number } = {}) {
+      return http.get(`/collectors/${id}/runs`, { params }).then(r => ({
+        runs: r.data,
+        total: Number(r.headers['x-total-count'] || 0)
+      }))
+    },
     datapoints(id: number, params: any = {}) { return http.get(`/collectors/${id}/datapoints`, { params }).then(r => r.data) }
   },
 

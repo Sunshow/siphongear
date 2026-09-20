@@ -20,9 +20,9 @@ import (
 	_ "github.com/sunshow/siphongear/internal/notify/builtin"
 	"github.com/sunshow/siphongear/internal/runner"
 	"github.com/sunshow/siphongear/internal/scheduler"
+	_ "github.com/sunshow/siphongear/internal/steps"
 	"github.com/sunshow/siphongear/internal/store"
 	"github.com/sunshow/siphongear/internal/store/models"
-	_ "github.com/sunshow/siphongear/internal/steps"
 	"github.com/sunshow/siphongear/internal/templates"
 	"github.com/sunshow/siphongear/pkg/logger"
 	"github.com/sunshow/siphongear/web"
@@ -94,6 +94,7 @@ func main() {
 	sch := scheduler.New(db, r, bus)
 	disp := notify.NewDispatcher(db, cipher, bus)
 	cleaner := store.NewCollectorCleaner(db, r)
+	historyCleaner := store.NewHistoryCleaner(db, cfg.History.RetentionDays)
 
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -103,6 +104,7 @@ func main() {
 	}
 	disp.Start(rootCtx)
 	cleaner.Start(rootCtx)
+	historyCleaner.Start(rootCtx)
 
 	staticFS, err := web.Dist()
 	if err != nil {
@@ -149,5 +151,6 @@ func main() {
 	sch.Stop()
 	cancel()
 	cleaner.Wait()
+	historyCleaner.Wait()
 	disp.Wait()
 }
