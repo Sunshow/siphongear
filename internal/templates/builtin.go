@@ -4,6 +4,25 @@ import (
 	"github.com/sunshow/siphongear/internal/pipeline"
 )
 
+// newapiTokenNormalizeScript accepts the credential field names users commonly
+// store a new-api access token under (access_token / api_key / token) and
+// produces a clean `newapi_token` plus optional `newapi_uid` for later steps.
+// NewAPI >= v1.0.0-rc.41 requires a scoped PAT (nap_ prefix); older builds used
+// a legacy access token plus the New-Api-User header. Both work through this
+// normalization, and a missing token fails with an actionable message instead
+// of sending `Authorization: Bearer <no value>`.
+const newapiTokenNormalizeScript = `var c = payload.vars.cred || {};
+function pick(k) {
+  var v = c[k];
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+}
+var token = pick("access_token") || pick("api_key") || pick("token");
+if (/^Bearer[ \t]+/i.test(token)) token = token.replace(/^Bearer[ \t]+/i, "").trim();
+if (!token) throw new Error("credential has no access_token/api_key - create a new-api access token in 个人设置 -> 安全设置 -> 访问令牌 (nap_ prefix, profile:read scope)");
+var uid = pick("user_id") || pick("uid");
+return { vars: { newapi_token: token, newapi_uid: uid } };`
+
 func init() {
 	Register(Template{
 		Name:            "sub2api-balance",
@@ -173,13 +192,13 @@ return { vars: {
 
 	Register(Template{
 		Name:            "newapi-balance-accesstoken",
-		Description:     "NewAPI (https://github.com/QuantumNous/new-api) 网关：使用「访问密钥」+ user_id 直接调 /api/user/self，按 /api/status 的 quota_per_unit 折算成 USD",
+		Description:     "NewAPI (https://github.com/QuantumNous/new-api) 网关：使用「访问令牌」直接调 /api/user/self，按 /api/status 的 quota_per_unit 折算成 USD。新版 NewAPI 需使用 nap_ 前缀的 scoped access token（scope: profile:read），旧版系统访问令牌已退役",
 		NeedsCredential: true,
 		CredentialHint: &TemplateCredentialHint{
 			Type: "token",
 			Fields: []TemplateCredentialField{
-				{Name: "access_token", Label: "Access Token", Type: "password", Required: true, Placeholder: "用户中心 -> 个人设置 -> 系统访问令牌"},
-				{Name: "user_id", Label: "User ID", Type: "text", Required: true, Placeholder: "如 12 (用户中心可见)"},
+				{Name: "access_token", Label: "Access Token", Type: "password", Required: true, Placeholder: "nap_...（新版：个人设置 → 安全设置 → 访问令牌，勾选 Profile 读取权限）"},
+				{Name: "user_id", Label: "User ID", Type: "text", Required: false, Placeholder: "如 69（旧版 NewAPI 必填，新版可留空）"},
 			},
 		},
 		ScheduleType: "interval",
@@ -195,13 +214,18 @@ return { vars: {
 						"credential_id": 0,
 						"var_name":      "cred",
 					}},
+				{Kind: "script.js.extract", Name: "normalize access token",
+					Config: map[string]any{
+						"source":     newapiTokenNormalizeScript,
+						"timeout_ms": 2000,
+					}},
 				{Kind: "fetch.http", Name: "fetch self",
 					Config: map[string]any{
 						"method": "GET",
 						"url":    "{{BASE_URL}}/api/user/self",
 						"headers": map[string]any{
-							"Authorization": "Bearer {{.vars.cred.access_token}}",
-							"New-Api-User":  "{{.vars.cred.user_id}}",
+							"Authorization": "Bearer {{.vars.newapi_token}}",
+							"New-Api-User":  "{{.vars.newapi_uid}}",
 						},
 						"timeout": 15,
 					}},
@@ -307,13 +331,13 @@ return { vars: {
 
 	Register(Template{
 		Name:            "rixapi-balance-accesstoken",
-		Description:     "RixAPI / 类 NewAPI 商业分支：使用「访问密钥」+ user_id 直接调 /api/user/self 取 balance（已是 USD）",
+		Description:     "RixAPI / 类 NewAPI 商业分支：使用「访问令牌」+ user_id 直接调 /api/user/self 取 balance（已是 USD）。新版分支的 scoped access token（nap_ 前缀）同样适用",
 		NeedsCredential: true,
 		CredentialHint: &TemplateCredentialHint{
 			Type: "token",
 			Fields: []TemplateCredentialField{
-				{Name: "access_token", Label: "Access Token", Type: "password", Required: true, Placeholder: "用户中心 -> 个人设置 -> 系统访问令牌"},
-				{Name: "user_id", Label: "User ID", Type: "text", Required: true, Placeholder: "如 12 (用户中心可见)"},
+				{Name: "access_token", Label: "Access Token", Type: "password", Required: true, Placeholder: "nap_...（新版：个人设置 → 安全设置 → 访问令牌）"},
+				{Name: "user_id", Label: "User ID", Type: "text", Required: false, Placeholder: "如 12（旧版 NewAPI 必填，新版可留空）"},
 			},
 		},
 		ScheduleType: "interval",
@@ -329,13 +353,18 @@ return { vars: {
 						"credential_id": 0,
 						"var_name":      "cred",
 					}},
+				{Kind: "script.js.extract", Name: "normalize access token",
+					Config: map[string]any{
+						"source":     newapiTokenNormalizeScript,
+						"timeout_ms": 2000,
+					}},
 				{Kind: "fetch.http", Name: "fetch self",
 					Config: map[string]any{
 						"method": "GET",
 						"url":    "{{BASE_URL}}/api/user/self",
 						"headers": map[string]any{
-							"Authorization": "Bearer {{.vars.cred.access_token}}",
-							"New-Api-User":  "{{.vars.cred.user_id}}",
+							"Authorization": "Bearer {{.vars.newapi_token}}",
+							"New-Api-User":  "{{.vars.newapi_uid}}",
 						},
 						"timeout": 15,
 					}},

@@ -6,14 +6,20 @@ import ResponsiveTable, { type RTColumn } from '@/components/ResponsiveTable.vue
 
 interface CredField { name: string; label: string; type: string; required: boolean; placeholder?: string }
 
+// Fields shown as first-class inputs per credential type. Templates declare
+// their own credential_hint fields (e.g. new-api's access_token, sub2api's
+// email); anything not listed here is preserved through the "Extra fields"
+// JSON box so editing a credential never silently drops template fields.
 const CRED_FIELDS: Record<string, CredField[]> = {
   password: [
-    { name: 'email', label: 'Email / Username', type: 'text', required: true, placeholder: 'user@example.com' },
+    { name: 'email', label: 'Email', type: 'text', required: false, placeholder: 'user@example.com (sub2api / udealproxy)' },
+    { name: 'username', label: 'Username', type: 'text', required: false, placeholder: 'new-api 等模板使用；与 Email 二选一' },
     { name: 'password', label: 'Password', type: 'password', required: true },
   ],
   token: [
-    { name: 'api_key', label: 'API Key / Token', type: 'password', required: true, placeholder: 'sk-...' },
-    { name: 'user_id', label: 'User ID', type: 'text', required: false, placeholder: 'optional' },
+    { name: 'api_key', label: 'API Key / Token', type: 'password', required: false, placeholder: 'sk-...' },
+    { name: 'access_token', label: 'Access Token', type: 'password', required: false, placeholder: 'nap_... (new-api: 个人设置 → 安全设置 → 访问令牌)' },
+    { name: 'user_id', label: 'User ID', type: 'text', required: false, placeholder: '如 69；仅旧版 new-api 需要' },
   ],
   cookie: [
     { name: 'cookie', label: 'Cookie', type: 'password', required: true, placeholder: 'session=...; key=...' },
@@ -26,14 +32,20 @@ const sites = ref<any[]>([])
 const dialog = ref(false)
 const form = reactive({ id: 0, site_id: 0, name: '', type: 'token' })
 const fieldsData = reactive<Record<string, string>>({})
+const extraJson = ref<string>('{}')
 const customPayload = ref<string>('{}')
 
 const fieldsForType = computed(() => CRED_FIELDS[form.type] || [])
 const isCustom = computed(() => form.type === 'custom')
 
+// Template credentials may carry fields the form does not know about, so they
+// are surfaced (and preserved) through the Extra fields JSON box.
+const knownFieldNames = computed(() => new Set(fieldsForType.value.map(f => f.name)))
+
 function resetFields() {
   for (const k of Object.keys(fieldsData)) delete fieldsData[k]
   for (const f of fieldsForType.value) fieldsData[f.name] = ''
+  extraJson.value = '{}'
   customPayload.value = '{}'
 }
 
@@ -63,6 +75,55 @@ function openCreate() {
   dialog.value = true
 }
 
+// normalizeSecret trims pasted values and removes a leading "Bearer " so a
+// token copied from docs/curl works as-is.
+function normalizeSecret(name: string, value: string): string {
+  let out = (value || '').trim()
+  if (name === 'api_key' || name === 'access_token' || name === 'token' || name === 'cookie') {
+    out = out.replace(/^Bearer\s+/i, '').trim()
+  }
+  return out
+}
+
+function hasValue(payload: Record<string, any>, key: string): boolean {
+  const v = payload[key]
+  if (typeof v === 'number') return true
+  return typeof v === 'string' && v.trim() !== ''
+}
+
+function validatePayload(type: string, payload: Record<string, any>): string | null {
+  if (type === 'password') {
+    if (!hasValue(payload, 'password')) return 'Password is required'
+    if (!hasValue(payload, 'email') && !hasValue(payload, 'username')) {
+      return 'Fill in either Email or Username (templates differ in which field they read)'
+    }
+  }
+  if (type === 'token') {
+    if (!hasValue(payload, 'api_key') && !hasValue(payload, 'access_token') && !hasValue(payload, 'token')) {
+      return 'Fill in an API Key or an Access Token'
+    }
+  }
+  if (type === 'cookie' && !hasValue(payload, 'cookie')) return 'Cookie is required'
+  return null
+}
+
+function parseExtras(): Record<string, any> | null {
+  const text = extraJson.value.trim()
+  if (!text || text === '{}') return {}
+  let parsed: any
+  try {
+    parsed = JSON.parse(text)
+  } catch (e: any) {
+    ElMessage.error('Extra fields must be valid JSON: ' + e.message)
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    ElMessage.error('Extra fields must be a JSON object')
+    return null
+  }
+  return parsed
+}
+
 function buildPayload(): any {
   if (isCustom.value) {
     try { return JSON.parse(customPayload.value || '{}') } catch (e: any) {
@@ -70,10 +131,21 @@ function buildPayload(): any {
       return null
     }
   }
-  const payload: Record<string, string> = {}
+  const extras = parseExtras()
+  if (extras === null) return null
+  const payload: Record<string, any> = { ...extras }
   for (const f of fieldsForType.value) {
-    if (fieldsData[f.name]) payload[f.name] = fieldsData[f.name]
-    else if (f.required) payload[f.name] = ''
+    const raw = fieldsData[f.name]
+    if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+      payload[f.name] = normalizeSecret(f.name, String(raw))
+    } else {
+      delete payload[f.name]
+    }
+  }
+  const err = validatePayload(form.type, payload)
+  if (err) {
+    ElMessage.error(err)
+    return null
   }
   return payload
 }
@@ -98,17 +170,20 @@ async function openEdit(row: any) {
   dialog.value = true
   try {
     const full = await api.credentials.get(row.id)
-    if (full.payload) {
-      if (isCustom.value) {
-        customPayload.value = JSON.stringify(full.payload, null, 2)
+    const payload = full?.payload || {}
+    if (isCustom.value) {
+      customPayload.value = JSON.stringify(payload, null, 2)
+      return
+    }
+    const extras: Record<string, any> = {}
+    for (const [k, v] of Object.entries(payload)) {
+      if (knownFieldNames.value.has(k)) {
+        fieldsData[k] = v === null || v === undefined ? '' : String(v)
       } else {
-        for (const f of fieldsForType.value) {
-          if (full.payload[f.name] !== undefined) {
-            fieldsData[f.name] = String(full.payload[f.name])
-          }
-        }
+        extras[k] = v
       }
     }
+    extraJson.value = Object.keys(extras).length ? JSON.stringify(extras, null, 2) : '{}'
   } catch { /* ignore */ }
 }
 
@@ -176,7 +251,21 @@ onMounted(reload)
               :placeholder="f.placeholder"
             />
           </el-form-item>
+          <el-form-item label="Extra fields (JSON)">
+            <el-input
+              v-model="extraJson"
+              type="textarea"
+              :rows="3"
+              placeholder='{"access_token": "nap_...", "token": "..."}'
+            />
+            <el-text type="info" size="small">
+              Template-specific fields the form above does not know about. They are preserved on edit and merged into the payload.
+            </el-text>
+          </el-form-item>
         </template>
+        <el-alert v-if="form.id" type="info" show-icon :closable="false">
+          Current values are loaded for editing; saving replaces the whole payload.
+        </el-alert>
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">Cancel</el-button>

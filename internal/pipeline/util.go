@@ -37,8 +37,20 @@ func RenderTemplate(tpl string, p *Payload, extra map[string]any) (string, error
 	if err := t.Execute(&buf, data); err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	out := buf.String()
+	// text/template renders a missing map key as the literal "<no value>"
+	// instead of failing. Letting that string through turns config mistakes
+	// (e.g. a credential without the referenced field) into confusing
+	// upstream errors such as `Authorization: Bearer <no value>`. Fail loudly
+	// instead; `{{if ...}}` and `default` still allow optional values.
+	if strings.Contains(out, missingValuePlaceholder) {
+		return "", fmt.Errorf("render template %q: unresolved variable, check that it exists in vars/meta", tpl)
+	}
+	return out, nil
 }
+
+// missingValuePlaceholder is what text/template writes for a missing map key.
+const missingValuePlaceholder = "<no value>"
 
 // CfgString reads a string config value, optionally rendering as template.
 func CfgString(cfg map[string]any, key string) string {
