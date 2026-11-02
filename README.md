@@ -28,7 +28,7 @@
 
 ## 核心特性
 
-- **可视化流水线**：每个采集任务由 `Input → Fetch → Transform → Parse → Extract` 五段组成，15 个内置 Step（HTTP / 浏览器 / JSONPath / CSS 选择器 / 正则 / JS 沙箱…），全部图形化配置
+- **可视化流水线**：每个采集任务由 `Input → Fetch → Transform → Parse → Extract` 五段组成，18 个内置 Step（HTTP / 浏览器 / JSONPath / CSS 选择器 / 正则 / JS 沙箱…），全部图形化配置
 - **模板一键创建**：选模板 → 填账号 → Apply，Site / Credential / Collector / Pipeline / Indicators 一次到位
 - **三种调度方式**：固定间隔、cron 表达式、事件链式触发（A 跑完触发 B）
 - **Site Tags + Dashboard 过滤**：上百个 collector 也能按 tag 多选分组
@@ -40,6 +40,7 @@
 - **Dry Run**：不写库试跑流水线，立即查看每个 Step 的输出片段
 - **Save as Template**：把调好的 Collector 一键存成自己的模板复用
 - **凭证 AES-GCM 加密**：永远不在 API 回写明文，运行时仅注入到 header / body
+- **会话复用（Session Reuse）**：密码登录站点首次登录后，把 cookies / UA / 关键变量加密持久化到 `sessions` 表；后续调度默认复用，只有会话失效才重新登录，避免每次运行都被站点当成新设备（见下文「会话复用」）
 - **单二进制 + 纯 Go SQLite**：无 cgo，开箱即用；MySQL / Postgres 也可
 
 ## 中文简介（架构）
@@ -137,7 +138,7 @@ cd web && npm install && npm run dev
 
 每个 Collector = 一条 Pipeline + 多个 Indicator + 一种 Schedule。
 
-- 编辑器分四块：基本信息 / Pipeline 步骤 / Indicators 绑定 / Schedule
+- 编辑器分四块：基本信息 / Pipeline 步骤 / Indicators 绑定 / Schedule；保存后多一个 **Session** tab，可以查看 / 清除该任务的持久化登录态（见「会话复用」）
 - **Dry Run**：不写库试跑，按步显示 Snippet 和 Vars，方便调流水线
 - **Save as Template**：调好后一键存为「用户模板」（带 `{{BASE_URL}}` 占位符），下次复用
 
@@ -192,6 +193,27 @@ cd web && npm install && npm run dev
 - `Object`：parse 阶段产物（JSON 对象 / goquery DOM）
 - `Vars`：键值表，extract 阶段往里塞值，runtime 模板可读 `{{.vars.foo}}`
 
+每个 Step 除了 `kind` / `name` / `config` / `enabled`，还可以带两个可选字段，用来做条件执行和容错：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `when` | string（JS 表达式） | 对当前 payload 求值，falsy 时跳过该 Step（Step Log 记为 skipped）。作用域与 `script.js.*` 相同：`payload = {vars, meta, body, object}`，同时暴露裸 `vars` / `meta`，如 `"when": "!vars.session_ok"`。表达式报错或超时（3s）会让整次运行失败 |
+| `on_error` | `fail`（默认）/ `continue` | `fail` 让整次运行失败（原行为）；`continue` 把错误记进 Step Log 后，带着失败前的 payload 继续跑后面的 Step，并写入 `vars.last_error`（错误文本）/ `vars.last_error_step`（步骤序号），本次运行不算失败 |
+
+编辑器里每个 Step 的 **Run if** / **On error** 高级选项就是这两个字段；设置了 `when` 的步骤会在标题旁显示 `when: ...` 标签。
+
+例如只在会话不可用时才登录：
+
+```json
+{
+  "kind": "fetch.http",
+  "name": "login",
+  "when": "!vars.session_ok",
+  "on_error": "continue",
+  "config": { "method": "POST", "url": "{{BASE_URL}}/api/user/login" }
+}
+```
+
 ### 内置 Step
 
 | 阶段 | Kind | 说明 |
@@ -199,11 +221,13 @@ cd web && npm install && npm run dev
 | input | `input.static` | 注入字面量到 Vars |
 | input | `input.credential` | 按 ID 取出加密凭证，解密注入 Vars |
 | input | `script.js.input` | goja JS 沙箱（默认禁网络） |
-| fetch | `fetch.http` | Resty，URL / Headers / Body 支持 `{{.vars.x}}` 模板 |
+| input | `session.load` | 恢复持久化会话（cookies / UA / vars），计算 `vars.session_ok` |
+| fetch | `fetch.http` | Resty，URL / Headers / Body 支持 `{{.vars.x}}` 模板；默认复用并回写会话（`use_session` / `session_key` / `user_agent` / `mark_login`） |
 | fetch | `fetch.browser` | chromedp 渲染 / 求值 |
 | transform | `transform.gunzip` | gzip 解压 |
 | transform | `transform.charset` | 按 Content-Type 转码 |
 | transform | `transform.template` | text/template 渲染当前 Body |
+| transform | `transform.expr` | 数值表达式（读 `vars.*`），单值或批量写回 Vars |
 | transform | `script.js.transform` | JS 沙箱改 Body / Vars |
 | parse | `parse.json` | sonic 解析为 Object |
 | parse | `parse.html` | goquery 文档 |
@@ -211,8 +235,132 @@ cd web && npm install && npm run dev
 | extract | `extract.css` | CSS 选择器 + 可选属性 |
 | extract | `extract.regex` | 命名分组直接成 Vars |
 | extract | `script.js.extract` | JS 沙箱写 Vars |
+| extract | `session.save` | 把本次抓到的 cookies + 选定的 vars 持久化，供后续运行复用（`ttl` / `login`） |
 
 UI 表单字段从 `GET /api/v1/registry/steps` 元数据自动渲染（`StepEditor.vue`）。
+
+---
+
+## 会话复用（Session Reuse）
+
+### 为什么需要
+
+很多站点（sub2api / NewAPI / GPT2IMAGE 等）只提供「邮箱 + 密码登录」换 token / Cookie，而每次登录都会被站点记成一个新设备。定时任务每 30 分钟跑一次，一天就是几十次登录；站点对设备数量 / 在线连接数做限制时，轻则频繁踢下线，重则直接锁号。
+
+### 解法
+
+把每个 collector 的登录态加密持久化下来，后续运行直接复用，只有确认会话不可用时才重新登录：
+
+- **存什么**：cookies（含 domain / path / 过期时间等属性）、选定的 vars、User-Agent——浏览器里维持登录态的那一套
+- **怎么存**：AES-GCM 加密后写入 `sessions` 表，master key 与凭证相同，进程重启后仍能读回；cookie / var 的**值永远不会出现在 API 响应里**
+- **怎么复用**：`fetch.http` 默认 `use_session: true`——请求前加载已保存的 cookies / UA，响应里的 `Set-Cookie` 自动合并回会话；step config 里显式写的 `Cookie` header 优先
+- **怎么判断失效**：`session.load` 恢复会话并算出 `vars.session_ok`（会话过期、没有 cookie / var、缺少 `require_vars` 都算不可用）；带上已保存的会话（cookie / UA）仍收到 401 / 403 时 `fetch.http` 会写 `vars.session_invalid`。多数模板用的是「探测请求 + `on_error: continue` + 脚本检查响应」：很多站点未登录时也返回 200 的登录页，只看状态码不够，所以脚本会再校验响应体特征
+- **过期**：`session.save` 的 `ttl`（如 `168h`）写 `expires_at`，过期后 `session.load` 直接给 `session_ok = false`
+- **Key**：默认 `collector:<collector_id>`；想让多个 collector 共享同一份登录态时，用步骤上的 `key`（`fetch.http` 里叫 `session_key`）覆盖
+
+### 推荐流水线
+
+密码登录站点的标准写法（内置模板 `sub2api-balance` / `newapi-balance` / `udealproxy-balance` / `gpt2image-balance` 都是这个模式）：
+
+1. `input.credential` 取账号密码
+2. `session.load` 恢复已有会话 → `vars.session_ok`
+3. `fetch.http` 带会话试打一次受保护接口：`when: vars.session_ok`、`on_error: continue`，把状态码存进 `probe_status`
+4. `script.js.transform` 检查 probe 的状态码 + 响应体特征，重新计算 `vars.session_ok`（probe 失败时状态变量不存在 → false）
+5. 登录（`when: !vars.session_ok`）→ `parse.json` / `extract.jsonpath` 拿 `user_id` 等变量 → `session.save`（`login: true`、`vars: ["user_id"]`）
+6. 重新 `fetch.http` 受保护接口（`when: !vars.session_ok`）→ `parse.json` → 抽指标；会话可用时直接用第 3 步的响应，跳过登录
+
+```json
+{
+  "steps": [
+    { "kind": "input.credential", "name": "load credential",
+      "config": { "credential_id": 0, "var_name": "cred" } },
+    { "kind": "session.load", "name": "load session",
+      "config": { "require_vars": ["user_id"] } },
+    { "kind": "fetch.http", "name": "probe protected", "when": "vars.session_ok", "on_error": "continue",
+      "config": { "method": "GET", "url": "{{BASE_URL}}/api/user/self", "save_status_as": "probe_status" } },
+    { "kind": "script.js.transform", "name": "recheck session",
+      "config": { "source": "var s = Number(payload.vars.probe_status || 0); var body = String(payload.body || ''); return { vars: { session_ok: s === 200 && body.indexOf('\"data\"') >= 0 } };" } },
+    { "kind": "fetch.http", "name": "login", "when": "!vars.session_ok",
+      "config": {
+        "method": "POST", "url": "{{BASE_URL}}/api/user/login",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"username\":\"{{.vars.cred.username}}\",\"password\":\"{{.vars.cred.password}}\"}"
+      } },
+    { "kind": "parse.json", "name": "parse login", "when": "!vars.session_ok" },
+    { "kind": "extract.jsonpath", "name": "extract user_id", "when": "!vars.session_ok",
+      "config": { "mappings": [ { "name": "user_id", "path": "$.data.user_id", "type": "string" } ] } },
+    { "kind": "session.save", "name": "save session", "when": "!vars.session_ok",
+      "config": { "login": true, "ttl": "168h", "vars": ["user_id"] } },
+    { "kind": "fetch.http", "name": "fetch protected", "when": "!vars.session_ok",
+      "config": { "method": "GET", "url": "{{BASE_URL}}/api/user/self" } },
+    { "kind": "parse.json", "name": "parse protected" },
+    { "kind": "extract.jsonpath", "name": "extract balance",
+      "config": { "mappings": [ { "name": "balance", "path": "$.data.balance", "type": "number" } ] } }
+  ]
+}
+```
+
+> 示例里的 probe 脚本只是演示：真实站点要按自己的成功返回判断（内置模板会检查 `"success":true`、`"data"`、Dashboard HTML 里的 `Credits Balance` 之类的特征）。probe 失败时 `on_error: continue` 会保留失败前的 payload，`probe_status` 不存在 → `session_ok=false` → 走登录分支。
+
+### Step 配置
+
+`session.load`（input 阶段）：
+
+| key | 类型 | 说明 |
+|---|---|---|
+| `key` | string（模板） | 会话 key，默认 collector key |
+| `require_vars` | string[] | 只有这些变量都存在且非空才算会话可用，如 `["user_id"]` |
+
+写回 `vars`：`session_ok`、`session_key`、`session_updated_at`（RFC3339 或空串）、`session_login_count`，以及所有持久化的变量。
+
+`session.save`（extract 阶段）：
+
+| key | 类型 | 说明 |
+|---|---|---|
+| `key` | string（模板） | 同上 |
+| `vars` | string[] | 要持久化的 payload 变量名，如 `["user_id"]` |
+| `ttl` | string | 过期时间，如 `168h`；到期后 `session.load` 判定不可用 |
+| `login` | bool | 标记为一次成功（重）登录：`login_count` +1、刷新 `last_login_at`、清掉旧的 TTL（同时配了 `ttl` 时按新值重设） |
+
+写回 `vars`：`session_saved`。
+
+`fetch.http` 与会话相关的配置：
+
+| key | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `use_session` | boolean | `true` | 请求前加载、响应后回写会话 |
+| `session_key` | string（模板） | `""`（= `collector:<id>`） | 覆盖会话作用域 |
+| `user_agent` | string（模板） | `""` | 显式 UA；留空时优先复用会话里保存的 UA，并把本次生效的 UA 再存回去（保持设备指纹稳定） |
+| `mark_login` | boolean | `false` | 把这次响应标为（重）登录：`login_count` +1、刷新 `last_login_at` |
+
+`fetch.http` 写出的会话相关运行时变量：`session_reused`（是否用上了已保存的 cookies / UA）、`session_invalid`（带上了已保存的会话仍返回 401 / 403）、`session_key`、`session_cookie_count`。
+
+> Dry Run 不会写持久会话：读取走真实会话（可复用），登录流程能在本次试跑里走通（cookie 只存在内存 overlay），但不会回写 / 落库，别指望靠 dry run 刷新登录态。
+
+### 查看与清除
+
+- **UI**：Collector 编辑页 → **Session** tab（已保存的 collector 才有），列出会话的 key / 状态 / cookie 数 / vars / 登录次数 / 最近使用与过期时间，支持单条 Clear 和 Clear all
+- **REST API**：
+
+```bash
+TOKEN="<POST /api/v1/auth/login 的返回值>"
+
+# 列出某个 collector 的会话
+curl -s -H "Authorization: Bearer $TOKEN" \
+     'http://localhost:7080/api/v1/sessions?collector_id=3' | jq
+
+# 清除单条 / 清空该 collector 的全部会话
+curl -s -X DELETE -H "Authorization: Bearer $TOKEN" 'http://localhost:7080/api/v1/sessions/1'
+curl -s -X DELETE -H "Authorization: Bearer $TOKEN" 'http://localhost:7080/api/v1/collectors/3/sessions'
+```
+
+改密码 / 换账号 / 怀疑账号被锁时，先清会话再手动 Run 一次；删除 collector 时它的会话会一起删掉。
+
+### 安全与注意
+
+- 会话 payload 用与凭证相同的 AES-GCM master key 加密落库；cookie 值 / 变量值等价于登录态，**不要在脚本里打印，也不要期望 API 返回**。换 `master_key` 会让旧凭证和旧会话都解不出来（和旧凭证一样）；解不开的会话按「没有会话」处理，下次运行会重新登录并覆盖旧记录，但凭证本身仍需重新保存
+- 会话是「每个 collector 一份、单实例」的设计：同一个 collector 不会被并发运行；但多个 collector 若配了同一个 `session_key`，并发运行时会话以最后一次落库为准，没有跨运行协调，多实例部署更不保证一致
+- **从旧模板建的 collector 不会自动升级**：重新用更新后的模板建一个（或手动往流水线里补 `session.load` / `session.save` 和 `when` 条件），才有「会话可用时跳过登录」的效果；不升级的 collector 也会因为 `fetch.http` 默认 `use_session: true` 而复用已保存的 cookie / UA（登录请求的 `Set-Cookie` 会被自动保存），但每次运行仍会完整走一遍登录
 
 ---
 
@@ -221,11 +369,14 @@ UI 表单字段从 `GET /api/v1/registry/steps` 元数据自动渲染（`StepEdi
 | 名称 | 适用 | 凭证 | 调度默认 |
 |---|---|---|---|
 | `deepseek-balance` | DeepSeek 官方 API `/user/balance`（CNY） | API Key | interval 30m |
-| `sub2api-balance` | sub2api 风格网关：邮箱+密码登录 | Email + Password | interval 30m |
-| `newapi-balance` | [QuantumNous/new-api](https://github.com/QuantumNous/new-api) cookie session 登录 | Username + Password | interval 30m |
+| `sub2api-balance` | sub2api 风格网关：邮箱+密码登录（会话复用） | Email + Password | interval 30m |
+| `newapi-balance` | [QuantumNous/new-api](https://github.com/QuantumNous/new-api) cookie session 登录（会话复用） | Username + Password | interval 30m |
 | `newapi-balance-accesstoken` | NewAPI 访问令牌直取，免登录（新版本用 `nap_` 前缀 scoped token，需 `profile:read`；也可兼容填在 API Key 字段） | Access Token + User ID（旧版需要，可选） | interval 30m |
 | `rixapi-balance-accesstoken` | RixAPI / NewAPI 商业分支（同样兼容 `nap_` scoped token） | Access Token + User ID（旧版需要，可选） | interval 30m |
-| `gpt2image-balance` | GPT2IMAGE 积分查询：邮箱+密码登录，从 Dashboard HTML 提取积分 | Email + Password | interval 30m |
+| `udealproxy-balance` | UDealProxy 海外住宅代理：邮箱+密码（md5）登录，取住宅 GB 余额（会话复用） | Email + Password | interval 30m |
+| `gpt2image-balance` | GPT2IMAGE 积分查询：邮箱+密码登录，从 Dashboard HTML 提取积分（会话复用） | Email + Password | interval 30m |
+
+其中四个密码登录模板（`sub2api-balance` / `newapi-balance` / `udealproxy-balance` / `gpt2image-balance`）已内置会话复用：首次登录后持久化 cookies / UA / 关键变量（gpt2image 只用到 cookie），后续调度运行先探测会话、可用时跳过登录（见上文「会话复用」一节）。
 
 模板源码：`internal/templates/builtin.go`。运行时也能 `GET /api/v1/templates` 拿全量定义。
 
@@ -331,13 +482,14 @@ history:
 Site -- 1..N --> Credentials
 Site -- 1..N --> Collectors
 Collector -- 有 1 条 --> Pipeline (JSON, 一组 Steps)
+Collector -- 0..N --> Sessions (AES-GCM 加密的 cookies / 选定 vars / UA，默认 1 条)
 Collector -- 1..N --> Indicators
 Indicator -- 1..N --> DataPoints (时序)
 Run -- 1..N --> StepLogs
 ThresholdRule -- 通过 indicator_key + 可选 tag --> 影响 Indicator 渲染
 ```
 
-Pipeline 是扁平的有序 Step 列表；每个 Step 有 `kind`（已注册的步骤类型）和 `config` 对象。Step 之间通过 `Payload.Vars` 传值，body 与 parsed object 也会跨步保留。
+Pipeline 是扁平的有序 Step 列表；每个 Step 有 `kind`（已注册的步骤类型）和 `config` 对象。Step 之间通过 `Payload.Vars` 传值，body 与 parsed object 也会跨步保留。每个 Step 还可带 `when` / `on_error` 条件字段（见「流水线 Pipeline」）。密码登录的 collector 还会用 `sessions` 表保存登录态：`fetch.http` 默认读写会话，`session.load` / `session.save` 控制何时恢复与落盘（见「会话复用」）。
 
 ---
 
@@ -359,6 +511,10 @@ GET    /templates/:name
 CRUD   /sites
 CRUD   /credentials                        payload 加密落库；编辑时 GET /credentials/:id 返回解密 payload 以便回填表单
 CRUD   /collectors
+
+GET    /sessions?collector_id=             持久化会话列表（只返回元信息，不含 cookie / var 值）
+DELETE /sessions/:id                       删除单条会话
+DELETE /collectors/:id/sessions            清空该 collector 的全部会话
 
 POST   /collectors/:id/run                 同步触发一次，返回结果
 POST   /collectors/:id/dryrun              试跑（不写库），返回每步日志
@@ -382,6 +538,8 @@ GET    /notify/logs?channel_id=&rule_id=&collector_id=&limit=
 ```
 
 Runs 接口仍返回数组，每项包含 `data_points`；响应头 `X-Total-Count` 为筛选后总数。Runs 的 `limit` 范围为 1–200，Data Points 为 1–5000；`offset` 从 0 开始。面板这两个历史接口均按时间降序（同时间按 ID 降序），`from` / `to` 为带时区的 RFC3339 时间，采用左闭右开 `[from, to)`；按日期查询时 `to` 应传结束日期的次日零点。公开 API 的历史接口保持原有行为。
+
+会话管理端点（`GET /sessions` / `DELETE /sessions/:id` / `DELETE /collectors/:id/sessions`）同样是 JWT 鉴权，字段与示例见 [API.md 第 3 节](./API.md#3-会话管理面板内部jwt-鉴权)。
 
 ---
 
@@ -450,6 +608,7 @@ siphongear/
 │   ├── runner/                 触发 collector，落库 run/step/datapoints
 │   ├── rules/                  阈值规则引擎
 │   ├── scheduler/              cron + 事件订阅
+│   ├── session/                会话状态（cookies / vars / UA）加密持久化
 │   ├── steps/                  内置 step
 │   ├── store/                  GORM 模型 + 迁移
 │   └── templates/              内置任务模板
@@ -484,13 +643,14 @@ make clean       # 清掉 bin/ web/dist/ data/
 
 - 没有专门的指标历史曲线大图页（数据已落 `data_points`，目前在 Collector History 中随 Run 展示）
 - 单二进制单实例，多实例需引入分布式锁
+- 会话复用同样假设单实例：同一个 collector 不会被并发运行，但多个 collector 配了同一个 `session_key` 并并发运行时，会话以最后一次落库为准，没有跨运行协调
 - `fetch.browser` 在 macOS 默认拉本机 Chrome；远程模式通过 `BROWSER_WS_URL` 接 chrome:devtools
 
 ---
 
 ## English summary
 
-SiphonGear is a configuration-driven, single-binary collector + dashboard. Define an `Input → Fetch → Transform → Parse → Extract` pipeline per task, schedule it (interval / cron / event), and watch values flow into a time-series dashboard with tag filtering and threshold-based alert rules. Rules can fan out to pluggable notification channels (ServerChan built in) on OK→alert / alert→OK transitions, with optional Go-template title/body. Credentials and channel payloads are AES-GCM encrypted at rest. Defaults to pure-Go SQLite (no cgo); MySQL / Postgres also supported. Originally built for tracking recharge balances across many LLM gateways, generalized to any periodic web/API metric collection. UI in Vue 3 + Element Plus, embedded via `go:embed`.
+SiphonGear is a configuration-driven, single-binary collector + dashboard. Define an `Input → Fetch → Transform → Parse → Extract` pipeline per task, schedule it (interval / cron / event), and watch values flow into a time-series dashboard with tag filtering and threshold-based alert rules. Rules can fan out to pluggable notification channels (ServerChan built in) on OK→alert / alert→OK transitions, with optional Go-template title/body. Credentials and channel payloads are AES-GCM encrypted at rest. Password-login collectors also persist an encrypted per-collector session (cookies + selected vars + user agent) and reuse it on later runs; the `session.load` / `session.save` steps plus per-step `when` / `on_error` conditions re-login only when the saved session stops working. Defaults to pure-Go SQLite (no cgo); MySQL / Postgres also supported. Originally built for tracking recharge balances across many LLM gateways, generalized to any periodic web/API metric collection. UI in Vue 3 + Element Plus, embedded via `go:embed`.
 
 ---
 

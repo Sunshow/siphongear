@@ -74,6 +74,14 @@ export const api = {
     remove(id: number) { return http.delete(`/indicators/${id}`).then(r => r.data) }
   },
 
+  sessions: {
+    list(collectorId?: number) {
+      return http.get('/sessions', { params: collectorId ? { collector_id: collectorId } : {} }).then(r => r.data)
+    },
+    remove(id: number) { return http.delete(`/sessions/${id}`).then(r => r.data) },
+    clearCollector(collectorId: number) { return http.delete(`/collectors/${collectorId}/sessions`).then(r => r.data) }
+  },
+
   runs: {
     get(id: number) { return http.get(`/runs/${id}`).then(r => r.data) }
   },

@@ -20,6 +20,7 @@ import (
 	_ "github.com/sunshow/siphongear/internal/notify/builtin"
 	"github.com/sunshow/siphongear/internal/runner"
 	"github.com/sunshow/siphongear/internal/scheduler"
+	"github.com/sunshow/siphongear/internal/session"
 	_ "github.com/sunshow/siphongear/internal/steps"
 	"github.com/sunshow/siphongear/internal/store"
 	"github.com/sunshow/siphongear/internal/store/models"
@@ -90,7 +91,8 @@ func main() {
 
 	bus := events.NewBus()
 	jwtSvc := auth.NewJWT(cfg.Auth.JWTSecret, cfg.Auth.TokenTTLHrs)
-	r := runner.New(db, cipher, bus, cfg.Runner.MaxConcurrency)
+	sessionMgr := session.NewManager(db, cipher)
+	r := runner.New(db, cipher, bus, sessionMgr, cfg.Runner.MaxConcurrency)
 	sch := scheduler.New(db, r, bus)
 	disp := notify.NewDispatcher(db, cipher, bus)
 	cleaner := store.NewCollectorCleaner(db, r)
@@ -116,6 +118,7 @@ func main() {
 		JWT:              jwtSvc,
 		Cipher:           cipher,
 		Runner:           r,
+		Sessions:         sessionMgr,
 		Scheduler:        sch,
 		TplStore:         templates.NewStore(db),
 		NotifyDispatcher: disp,

@@ -13,29 +13,32 @@ import (
 	"github.com/sunshow/siphongear/internal/crypto"
 	"github.com/sunshow/siphongear/internal/events"
 	"github.com/sunshow/siphongear/internal/pipeline"
+	"github.com/sunshow/siphongear/internal/session"
 	"github.com/sunshow/siphongear/internal/store/models"
 )
 
 // Runner executes collectors and persists run/step/datapoint records.
 type Runner struct {
-	db     *gorm.DB
-	cipher *crypto.Cipher
-	bus    *events.Bus
-	sem    chan struct{}
-	mu     sync.Mutex
-	active map[uint]chan struct{}
+	db       *gorm.DB
+	cipher   *crypto.Cipher
+	bus      *events.Bus
+	sessions *session.Manager
+	sem      chan struct{}
+	mu       sync.Mutex
+	active   map[uint]chan struct{}
 }
 
-func New(db *gorm.DB, cipher *crypto.Cipher, bus *events.Bus, maxConcurrency int) *Runner {
+func New(db *gorm.DB, cipher *crypto.Cipher, bus *events.Bus, sessions *session.Manager, maxConcurrency int) *Runner {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 4
 	}
 	return &Runner{
-		db:     db,
-		cipher: cipher,
-		bus:    bus,
-		sem:    make(chan struct{}, maxConcurrency),
-		active: map[uint]chan struct{}{},
+		db:       db,
+		cipher:   cipher,
+		bus:      bus,
+		sessions: sessions,
+		sem:      make(chan struct{}, maxConcurrency),
+		active:   map[uint]chan struct{}{},
 	}
 }
 
@@ -90,9 +93,9 @@ func (r *stepRecorder) OnStepEnd(index int, kind string, dur time.Duration, snip
 
 // RunResult is returned from Trigger.
 type RunResult struct {
-	Run        *models.Run
-	Result     *pipeline.Result
-	StepLogs   []models.StepLog
+	Run      *models.Run
+	Result   *pipeline.Result
+	StepLogs []models.StepLog
 }
 
 // Trigger runs a collector by ID.
@@ -151,6 +154,16 @@ func (r *Runner) Trigger(ctx context.Context, collectorID uint, trigger string, 
 
 	logger := log.With().Uint64("run_id", run.ID).Uint("collector_id", collectorID).Logger()
 
+	var sessionStore pipeline.SessionStore
+	if r.sessions != nil {
+		if dryRun {
+			// Dry runs may read the persisted session, but writes stay in memory
+			// so a login flow can complete without touching scheduled-run state.
+			sessionStore = session.NewDryRunStore(r.sessions)
+		} else {
+			sessionStore = r.sessions
+		}
+	}
 	pCtx := &pipeline.Context{
 		Context:     pipCtx,
 		RunID:       run.ID,
@@ -158,6 +171,9 @@ func (r *Runner) Trigger(ctx context.Context, collectorID uint, trigger string, 
 		Trigger:     trigger,
 		Logger:      logger,
 		Credentials: &credResolver{db: r.db, cipher: r.cipher},
+		Sessions:    sessionStore,
+		SessionKey:  fmt.Sprintf("collector:%d", collectorID),
+		DryRun:      dryRun,
 		Now:         time.Now(),
 	}
 	if !dryRun {

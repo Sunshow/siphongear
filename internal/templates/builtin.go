@@ -23,10 +23,52 @@ if (!token) throw new Error("credential has no access_token/api_key - create a n
 var uid = pick("user_id") || pick("uid");
 return { vars: { newapi_token: token, newapi_uid: uid } };`
 
+// newapiSessionProbeScript flips vars.session_ok when the saved-cookie probe
+// request did not actually return an authenticated NewAPI payload.
+const newapiSessionProbeScript = `var status = Number(payload.vars.self_status || 0);
+var ok = false;
+if (status === 200) {
+  try {
+    var body = JSON.parse(String(payload.body || ""));
+    ok = !!body && body.success === true;
+  } catch (e) { ok = false; }
+}
+return { vars: { session_ok: ok } };`
+
+// sub2apiSessionProbeScript flips vars.session_ok when the persisted token was
+// rejected by the profile endpoint.
+const sub2apiSessionProbeScript = `var status = Number(payload.vars.profile_status || 0);
+var ok = false;
+if (status === 200) {
+  try {
+    var body = JSON.parse(String(payload.body || ""));
+    ok = !!body && body.data !== undefined && body.data !== null;
+  } catch (e) { ok = false; }
+}
+return { vars: { session_ok: ok } };`
+
+// udealproxySessionProbeScript flips vars.session_ok when the persisted token
+// was rejected by the balance endpoint.
+const udealproxySessionProbeScript = `var status = Number(payload.vars.balance_status || 0);
+var ok = false;
+if (status === 200) {
+  try {
+    var body = JSON.parse(String(payload.body || ""));
+    ok = !!body && body.data !== undefined && body.data !== null;
+  } catch (e) { ok = false; }
+}
+return { vars: { session_ok: ok } };`
+
+// gpt2imageSessionProbeScript detects an expired better-auth session: the
+// dashboard request "succeeds" but renders the sign-in page instead.
+const gpt2imageSessionProbeScript = `var status = Number(payload.vars.dashboard_status || 0);
+var html = String(payload.vars.dashboard_html || "");
+return { vars: { session_ok: status === 200 && html.indexOf("Credits Balance") >= 0 } };`
+
 func init() {
 	Register(Template{
 		Name:            "sub2api-balance",
-		Description:     "sub2api 风格网关：邮箱+密码登录 -> /api/v1/user/profile 取 balance",
+		Description:     "sub2api 风格网关：复用持久化会话（cookie + token）优先免登录，会话失效才邮箱+密码重登 -> /api/v1/user/profile 取 balance",
 		NeedsCredential: true,
 		CredentialHint: &TemplateCredentialHint{
 			Type: "password",
@@ -35,9 +77,9 @@ func init() {
 				{Name: "password", Label: "Password", Type: "password", Required: true},
 			},
 		},
-		ScheduleType:    "interval",
-		ScheduleSpec:    "30m",
-		Timeout:         30,
+		ScheduleType: "interval",
+		ScheduleSpec: "30m",
+		Timeout:      30,
 		Variables: []TemplateVariable{
 			{Name: "base_url", Label: "Base URL", Placeholder: "http://example.com:port", Required: true},
 		},
@@ -48,7 +90,26 @@ func init() {
 						"credential_id": 0,
 						"var_name":      "cred",
 					}},
-				{Kind: "fetch.http", Name: "login",
+				{Kind: "session.load", Name: "restore session",
+					Config: map[string]any{
+						"require_vars": []any{"token"},
+					}},
+				{Kind: "fetch.http", Name: "fetch profile (saved session)", When: "vars.session_ok", OnError: "continue",
+					Config: map[string]any{
+						"method": "GET",
+						"url":    "{{BASE_URL}}/api/v1/user/profile",
+						"headers": map[string]any{
+							"Authorization": "Bearer {{.vars.token}}",
+						},
+						"timeout":        15,
+						"save_status_as": "profile_status",
+					}},
+				{Kind: "script.js.transform", Name: "evaluate saved session",
+					Config: map[string]any{
+						"source":     sub2apiSessionProbeScript,
+						"timeout_ms": 2000,
+					}},
+				{Kind: "fetch.http", Name: "login", When: "!vars.session_ok",
 					Config: map[string]any{
 						"method":  "POST",
 						"url":     "{{BASE_URL}}/api/v1/auth/login",
@@ -56,14 +117,19 @@ func init() {
 						"body":    `{"email":"{{.vars.cred.email}}","password":"{{.vars.cred.password}}"}`,
 						"timeout": 15,
 					}},
-				{Kind: "parse.json", Name: "parse login"},
-				{Kind: "extract.jsonpath", Name: "extract token",
+				{Kind: "parse.json", Name: "parse login", When: "!vars.session_ok"},
+				{Kind: "extract.jsonpath", Name: "extract token", When: "!vars.session_ok",
 					Config: map[string]any{
 						"mappings": []any{
 							map[string]any{"name": "token", "path": "$.data.access_token", "type": "string"},
 						},
 					}},
-				{Kind: "fetch.http", Name: "fetch profile",
+				{Kind: "session.save", Name: "remember session", When: "!vars.session_ok",
+					Config: map[string]any{
+						"vars":  []any{"token"},
+						"login": true,
+					}},
+				{Kind: "fetch.http", Name: "fetch profile", When: "!vars.session_ok",
 					Config: map[string]any{
 						"method":  "GET",
 						"url":     "{{BASE_URL}}/api/v1/user/profile",
@@ -87,7 +153,7 @@ func init() {
 
 	Register(Template{
 		Name:            "newapi-balance",
-		Description:     "NewAPI (https://github.com/QuantumNous/new-api) 网关：用户名/密码登录 (cookie session) -> /api/user/self 取 quota，按 /api/status 的 quota_per_unit 折算成 USD",
+		Description:     "NewAPI (https://github.com/QuantumNous/new-api) 网关：复用持久化的 cookie 会话优先免登录，会话失效才用户名/密码重登 -> /api/user/self 取 quota，按 /api/status 的 quota_per_unit 折算成 USD",
 		NeedsCredential: true,
 		CredentialHint: &TemplateCredentialHint{
 			Type: "password",
@@ -109,39 +175,50 @@ func init() {
 						"credential_id": 0,
 						"var_name":      "cred",
 					}},
-				{Kind: "fetch.http", Name: "login",
+				{Kind: "session.load", Name: "restore session",
 					Config: map[string]any{
-						"method":          "POST",
-						"url":             "{{BASE_URL}}/api/user/login",
-						"headers":         map[string]any{"Content-Type": "application/json"},
-						"body":            `{"username":"{{.vars.cred.username}}","password":"{{.vars.cred.password}}"}`,
-						"timeout":         15,
-						"save_headers_as": "login_headers",
+						"require_vars": []any{"user_id"},
 					}},
-				{Kind: "parse.json", Name: "parse login"},
-				{Kind: "extract.jsonpath", Name: "extract user_id",
+				{Kind: "fetch.http", Name: "fetch self (saved session)", When: "vars.session_ok", OnError: "continue",
+					Config: map[string]any{
+						"method": "GET",
+						"url":    "{{BASE_URL}}/api/user/self",
+						"headers": map[string]any{
+							"New-Api-User": "{{.vars.user_id}}",
+						},
+						"timeout":        15,
+						"save_status_as": "self_status",
+					}},
+				{Kind: "script.js.transform", Name: "evaluate saved session",
+					Config: map[string]any{
+						"source":     newapiSessionProbeScript,
+						"timeout_ms": 2000,
+					}},
+				{Kind: "fetch.http", Name: "login", When: "!vars.session_ok",
+					Config: map[string]any{
+						"method":  "POST",
+						"url":     "{{BASE_URL}}/api/user/login",
+						"headers": map[string]any{"Content-Type": "application/json"},
+						"body":    `{"username":"{{.vars.cred.username}}","password":"{{.vars.cred.password}}"}`,
+						"timeout": 15,
+					}},
+				{Kind: "parse.json", Name: "parse login", When: "!vars.session_ok"},
+				{Kind: "extract.jsonpath", Name: "extract user_id", When: "!vars.session_ok",
 					Config: map[string]any{
 						"mappings": []any{
 							map[string]any{"name": "user_id", "path": "$.data.id", "type": "string"},
 						},
 					}},
-				{Kind: "script.js.extract", Name: "extract session cookie",
+				{Kind: "session.save", Name: "remember session", When: "!vars.session_ok",
 					Config: map[string]any{
-						"source": `var h = payload.vars.login_headers || {};
-var raw = h["Set-Cookie"];
-if (Array.isArray(raw)) raw = raw.join("; ");
-raw = raw || "";
-var m = raw.match(/session=([^;]+)/);
-if (!m) throw new Error("session cookie not found in login response");
-return { vars: { session: m[1] } };`,
-						"timeout_ms": 2000,
+						"vars":  []any{"user_id"},
+						"login": true,
 					}},
-				{Kind: "fetch.http", Name: "fetch self",
+				{Kind: "fetch.http", Name: "fetch self", When: "!vars.session_ok",
 					Config: map[string]any{
 						"method": "GET",
 						"url":    "{{BASE_URL}}/api/user/self",
 						"headers": map[string]any{
-							"Cookie":       "session={{.vars.session}}",
 							"New-Api-User": "{{.vars.user_id}}",
 						},
 						"timeout": 15,
@@ -387,7 +464,7 @@ return { vars: {
 
 	Register(Template{
 		Name:            "udealproxy-balance",
-		Description:     "UDealProxy 海外住宅代理：邮箱+密码 (md5) 登录 -> /customer_wallet/get_balance 取住宅 GB 余额（十进制 GB）",
+		Description:     "UDealProxy 海外住宅代理：复用持久化 token 会话优先免登录，会话失效才邮箱+密码 (md5) 重登 -> /customer_wallet/get_balance 取住宅 GB 余额（十进制 GB）",
 		NeedsCredential: true,
 		CredentialHint: &TemplateCredentialHint{
 			Type: "password",
@@ -407,12 +484,32 @@ return { vars: {
 						"credential_id": 0,
 						"var_name":      "cred",
 					}},
-				{Kind: "script.js.input", Name: "md5 password",
+				{Kind: "session.load", Name: "restore session",
+					Config: map[string]any{
+						"require_vars": []any{"token"},
+					}},
+				{Kind: "fetch.http", Name: "fetch balance (saved session)", When: "vars.session_ok", OnError: "continue",
+					Config: map[string]any{
+						"method": "GET",
+						"url":    "https://www.udealproxy.com/api/star-service-customer/customer_wallet/get_balance",
+						"headers": map[string]any{
+							"X-MCSHONG-AUTH-TOKEN": "{{.vars.token}}",
+							"language":             "en",
+						},
+						"timeout":        15,
+						"save_status_as": "balance_status",
+					}},
+				{Kind: "script.js.transform", Name: "evaluate saved session",
+					Config: map[string]any{
+						"source":     udealproxySessionProbeScript,
+						"timeout_ms": 2000,
+					}},
+				{Kind: "script.js.input", Name: "md5 password", When: "!vars.session_ok",
 					Config: map[string]any{
 						"source":     `return { vars: { password_hash: crypto.md5(payload.vars.cred.password) } };`,
 						"timeout_ms": 2000,
 					}},
-				{Kind: "fetch.http", Name: "login",
+				{Kind: "fetch.http", Name: "login", When: "!vars.session_ok",
 					Config: map[string]any{
 						"method": "POST",
 						"url":    "https://www.udealproxy.com/api/star-base-auth-server/customer_auth/login",
@@ -423,14 +520,19 @@ return { vars: {
 						"body":    `{"account":"{{.vars.cred.email}}","password":"{{.vars.password_hash}}"}`,
 						"timeout": 15,
 					}},
-				{Kind: "parse.json", Name: "parse login"},
-				{Kind: "extract.jsonpath", Name: "extract token",
+				{Kind: "parse.json", Name: "parse login", When: "!vars.session_ok"},
+				{Kind: "extract.jsonpath", Name: "extract token", When: "!vars.session_ok",
 					Config: map[string]any{
 						"mappings": []any{
 							map[string]any{"name": "token", "path": "$.data.token", "type": "string"},
 						},
 					}},
-				{Kind: "fetch.http", Name: "fetch balance",
+				{Kind: "session.save", Name: "remember session", When: "!vars.session_ok",
+					Config: map[string]any{
+						"vars":  []any{"token"},
+						"login": true,
+					}},
+				{Kind: "fetch.http", Name: "fetch balance", When: "!vars.session_ok",
 					Config: map[string]any{
 						"method": "GET",
 						"url":    "https://www.udealproxy.com/api/star-service-customer/customer_wallet/get_balance",
@@ -475,7 +577,7 @@ return { vars: { balance_gb: (n + p + t) / 1e9 } };`,
 
 	Register(Template{
 		Name:            "gpt2image-balance",
-		Description:     "GPT2IMAGE 积分查询：邮箱+密码登录 → 从 Dashboard HTML 提取可用积分（Credits Balance）",
+		Description:     "GPT2IMAGE 积分查询：复用持久化的 better-auth cookie 会话优先免登录，会话失效才邮箱+密码重登，从 Dashboard HTML 提取可用积分（Credits Balance）",
 		NeedsCredential: true,
 		CredentialHint: &TemplateCredentialHint{
 			Type: "password",
@@ -497,32 +599,40 @@ return { vars: { balance_gb: (n + p + t) / 1e9 } };`,
 						"credential_id": 0,
 						"var_name":      "cred",
 					}},
-				{Kind: "fetch.http", Name: "login",
+				{Kind: "session.load", Name: "restore session"},
+				{Kind: "fetch.http", Name: "fetch dashboard (saved session)", When: "vars.session_ok", OnError: "continue",
+					Config: map[string]any{
+						"method": "GET",
+						"url":    "{{BASE_URL}}/en/dashboard",
+						"headers": map[string]any{
+							"Accept": "text/html,application/xhtml+xml",
+						},
+						"timeout":        15,
+						"save_body_as":   "dashboard_html",
+						"save_status_as": "dashboard_status",
+					}},
+				{Kind: "script.js.transform", Name: "evaluate saved session",
+					Config: map[string]any{
+						"source":     gpt2imageSessionProbeScript,
+						"timeout_ms": 2000,
+					}},
+				{Kind: "fetch.http", Name: "login", When: "!vars.session_ok",
 					Config: map[string]any{
 						"method":  "POST",
 						"url":     "{{BASE_URL}}/api/auth/sign-in/email",
 						"headers": map[string]any{"Content-Type": "application/json"},
 						"body":    `{"email":"{{.vars.cred.email}}","password":"{{.vars.cred.password}}","callbackURL":"/dashboard"}`,
-						"timeout":         15,
-						"save_headers_as": "login_headers",
+						"timeout": 15,
 					}},
-				{Kind: "script.js.extract", Name: "extract session cookie",
+				{Kind: "session.save", Name: "remember login", When: "!vars.session_ok",
 					Config: map[string]any{
-						"source": `var h = payload.vars.login_headers || {};
-var raw = h["Set-Cookie"] || h["set-cookie"];
-if (Array.isArray(raw)) raw = raw.join("; ");
-raw = raw || "";
-var m = raw.match(/__Secure-better-auth\.session_token=([^;]+)/);
-if (!m) throw new Error("session_token cookie not found in login response");
-return { vars: { session_token: m[1] } };`,
-						"timeout_ms": 2000,
+						"login": true,
 					}},
-				{Kind: "fetch.http", Name: "fetch dashboard",
+				{Kind: "fetch.http", Name: "fetch dashboard", When: "!vars.session_ok",
 					Config: map[string]any{
 						"method": "GET",
 						"url":    "{{BASE_URL}}/en/dashboard",
 						"headers": map[string]any{
-							"Cookie": "__Secure-better-auth.session_token={{.vars.session_token}}",
 							"Accept": "text/html,application/xhtml+xml",
 						},
 						"timeout":      15,

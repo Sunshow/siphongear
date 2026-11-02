@@ -2,7 +2,7 @@
 
 本文只描述用 **API Key** 鉴权的对外只读接口（`/api/public/*`），适合把 SiphonGear 采集到的指标接进 Grafana / 自建大盘 / 飞书机器人 / 自动化脚本等外部系统。
 
-面板内部用的 `/api/v1/*` 走 JWT 鉴权，不在本文范围，简表见 [README.md](./README.md#rest-api)。
+面板内部用的 `/api/v1/*` 走 JWT 鉴权，通常不在本文范围，简表见 [README.md](./README.md#rest-api)；例外是文末第 3 节的会话管理接口（查看 / 清理持久化登录态），供运维脚本使用。
 
 ---
 
@@ -261,6 +261,146 @@ curl -s "http://localhost:7080/api/public/indicators?api_key=$KEY&indicator_key=
 # 4) 拉某个 collector 的 balance 历史
 curl -s -H "X-API-Key: $KEY" \
      'http://localhost:7080/api/public/indicators/12/balance/history?limit=500' | jq
+```
+
+---
+
+## 3. 会话管理（面板内部，JWT 鉴权）
+
+> 本节三个端点挂在 `/api/v1` 下，**不走 API Key 公开鉴权**：先 `POST /api/v1/auth/login` 拿 JWT，再带 `Authorization: Bearer <token>`。下文的 `$TOKEN` 就是这个 JWT。
+
+后台定时采集如果用了会话复用，每个 collector 的登录态（cookies + 选定变量 + User-Agent）会 AES-GCM 加密落到 `sessions` 表。这几个端点只返回会话元信息，**cookie 值、变量值等 payload 永远不返回**；用途是确认某个 collector 是否在复用会话、登录次数是否异常增长，或在改密码 / 换账号后清空会话强制重新登录。机制说明见 [README.md](./README.md) 的「会话复用」一节。
+
+### 3.1 `GET /api/v1/sessions`
+
+列出持久化会话。
+
+#### Query 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `collector_id` | uint | 否 | 只返回该 Collector 的会话；省略时返回全部会话 |
+| `site_id` | uint | 否 | 只返回属于该 Site 的会话（按 collector 的 site 关联过滤） |
+
+结果按 `updated_at` 倒序（最近使用过的在前）。
+
+#### 响应
+
+`200 OK`，body 是数组。每个元素：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | uint | 会话 ID（删除单条时用） |
+| `key` | string | 会话 key，默认 `collector:<collector_id>`，可由 step 的 `session_key`（`session.load` / `session.save` 里叫 `key`）覆盖 |
+| `collector_id` | uint | 创建 / 所属 Collector ID |
+| `cookie_count` | int | 持久化的 cookie 数量 |
+| `var_keys` | string | 持久化的变量名，逗号分隔（如 `user_id`；没有则为空串） |
+| `login_count` | int | 该会话被（重）登录的次数 |
+| `last_login_at` | string\|null | 最近一次登录时间（RFC3339）；从未登录为 `null` |
+| `last_used_at` | string\|null | 最近一次使用 / 写入会话的时间（`fetch.http` 的会话请求或 `session.save`）；没用过为 `null` |
+| `expires_at` | string\|null | 会话过期时间（`session.save.ttl`）；`null` 表示不过期 |
+| `status` | string | `active` / `expired`：读取时按 `expires_at` 和是否还有数据计算 |
+| `created_at` | string | 创建时间（RFC3339） |
+| `updated_at` | string | 更新时间（RFC3339） |
+
+> 响应里没有 `payload` 字段：cookie / 变量 / UA 均为加密存储，任何接口都不解密回写。
+
+#### 示例
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+     'http://localhost:7080/api/v1/sessions?collector_id=3' | jq
+```
+
+```json
+[
+  {
+    "id": 1,
+    "key": "collector:3",
+    "collector_id": 3,
+    "cookie_count": 2,
+    "var_keys": "user_id",
+    "login_count": 4,
+    "last_login_at": "2026-05-28T03:21:11Z",
+    "last_used_at": "2026-05-28T03:51:11Z",
+    "expires_at": null,
+    "status": "active",
+    "created_at": "2026-05-01T10:00:00Z",
+    "updated_at": "2026-05-28T03:51:11Z"
+  }
+]
+```
+
+#### 错误
+
+| HTTP | body | 含义 |
+|------|------|------|
+| 400 | `{"error":"invalid collector_id"}` | `collector_id` 不是数字 |
+| 400 | `{"error":"invalid site_id"}` | `site_id` 不是数字 |
+
+### 3.2 `DELETE /api/v1/sessions/:id`
+
+删除单条会话，下次运行会重新登录。
+
+#### Path 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | uint | 是 | 会话 ID（`GET /api/v1/sessions` 返回的 `id`） |
+
+#### 响应
+
+`200 OK`：
+
+```json
+{ "ok": true }
+```
+
+#### 错误
+
+| HTTP | body | 含义 |
+|------|------|------|
+| 400 | `{"error":"invalid session id"}` | path 里的 id 不是数字或为 0 |
+| 404 | `{"error":"not found"}` | 会话不存在（可能已被删除） |
+
+### 3.3 `DELETE /api/v1/collectors/:id/sessions`
+
+清空某个 Collector 的全部会话（比如改密码后强制重新登录）。
+
+#### Path 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | uint | 是 | Collector ID |
+
+#### 响应
+
+`200 OK`，`deleted` 为实际删除的会话条数（没有会话时是 `0`）：
+
+```json
+{ "ok": true, "deleted": 2 }
+```
+
+#### 错误
+
+| HTTP | body | 含义 |
+|------|------|------|
+| 400 | `{"error":"invalid collector id"}` | path 里的 id 不是数字或为 0 |
+
+> 删除 Collector 时它的会话会一并删除，不需要手动调这个接口；改密码 / 换账号后建议先清空会话，再手动触发一次运行。
+
+示例：
+
+```bash
+TOKEN="<POST /api/v1/auth/login 返回的 token>"
+
+# 3.1 列出 collector 3 的会话
+curl -s -H "Authorization: Bearer $TOKEN" \
+     'http://localhost:7080/api/v1/sessions?collector_id=3' | jq
+
+# 3.3 清空 collector 3 的全部会话
+curl -s -X DELETE -H "Authorization: Bearer $TOKEN" \
+     'http://localhost:7080/api/v1/collectors/3/sessions' | jq
 ```
 
 ---
