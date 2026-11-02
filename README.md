@@ -223,8 +223,8 @@ UI 表单字段从 `GET /api/v1/registry/steps` 元数据自动渲染（`StepEdi
 | `deepseek-balance` | DeepSeek 官方 API `/user/balance`（CNY） | API Key | interval 30m |
 | `sub2api-balance` | sub2api 风格网关：邮箱+密码登录 | Email + Password | interval 30m |
 | `newapi-balance` | [QuantumNous/new-api](https://github.com/QuantumNous/new-api) cookie session 登录 | Username + Password | interval 30m |
-| `newapi-balance-accesstoken` | NewAPI 访问令牌直取，免登录 | Access Token + User ID | interval 30m |
-| `rixapi-balance-accesstoken` | RixAPI / NewAPI 商业分支 | Access Token + User ID | interval 30m |
+| `newapi-balance-accesstoken` | NewAPI 访问令牌直取，免登录（新版本用 `nap_` 前缀 scoped token，需 `profile:read`；也可兼容填在 API Key 字段） | Access Token + User ID（旧版需要，可选） | interval 30m |
+| `rixapi-balance-accesstoken` | RixAPI / NewAPI 商业分支（同样兼容 `nap_` scoped token） | Access Token + User ID（旧版需要，可选） | interval 30m |
 | `gpt2image-balance` | GPT2IMAGE 积分查询：邮箱+密码登录，从 Dashboard HTML 提取积分 | Email + Password | interval 30m |
 
 模板源码：`internal/templates/builtin.go`。运行时也能 `GET /api/v1/templates` 拿全量定义。
@@ -357,7 +357,7 @@ GET    /templates                          内置 + 用户模板
 GET    /templates/:name
 
 CRUD   /sites
-CRUD   /credentials                        payload 加密落库，GET 不解密
+CRUD   /credentials                        payload 加密落库；编辑时 GET /credentials/:id 返回解密 payload 以便回填表单
 CRUD   /collectors
 
 POST   /collectors/:id/run                 同步触发一次，返回结果
