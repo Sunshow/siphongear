@@ -14,6 +14,7 @@ SiphonGear 是一个**配置驱动的通用采集与指标平台**。最初目�
 - 调度器（`internal/scheduler`）：robfig/cron 支持 interval / cron / event 三种模式
 - 数据层（`internal/store`）：GORM + SQLite（默认，glebarez 纯 Go 驱动），可换 MySQL / Postgres
 - 凭证 AES-GCM 加密（`internal/crypto`）；JWT 单用户认证（`internal/auth`）
+- 会话复用（`internal/session`）：按 collector 把 cookies / 选定 vars / UA 加密持久化到 `sessions` 表；`fetch.http` 默认读写会话，`session.load` / `session.save` Step 控制恢复与落盘，引擎支持 step 级 `when` / `on_error`
 - 模板（`internal/templates`）：内置任务模板，前端"From Template"一键应用
 - 前端（Vue 3 + TS + Element Plus + Pinia + Vue Router + ECharts），通过 `go:embed` 嵌入二进制
 
@@ -27,7 +28,7 @@ SiphonGear 是一个**配置驱动的通用采集与指标平台**。最初目�
 - 扩展点：
   - 新 Step：`pipeline.Register(StepMeta{...}, factory)` 在包 `init()` 注册
   - 新 Template：`templates.Register(...)` 在 `internal/templates/builtin.go` 注册
-- 加密：所有 Credential payload 经 AES-GCM 加密落库；返回 API 时永远不解密
+- 加密：所有 Credential payload 经 AES-GCM 加密落库，返回 API 时永不解密；会话 payload（cookies / vars / UA）用同一 master key 加密，API 只返回元信息
 - 安全：脚本 Step 默认禁用 `http.get/post`，需显式 `allow_http: true`；脚本超时通过 `runtime.Interrupt`
 
 ## 快速命令
@@ -66,6 +67,7 @@ make test
 | `internal/steps/<stage>/*.go` | 内置 Step 实现，每个文件 `init()` 注册自己 |
 | `internal/runner/runner.go` | 触发任务、写 Run / StepLog / DataPoint、发事件 |
 | `internal/scheduler/scheduler.go` | 把 enabled collector 注册到 cron / event 总线 |
+| `internal/session/` | 会话状态（cookies / 选定 vars / UA）AES-GCM 加密持久化 + cookie jar，供 `fetch.http` 复用 |
 | `internal/store/models/models.go` | GORM 表结构 |
 | `internal/api/router.go` + `handlers.go` | REST 路由与 handlers |
 | `internal/templates/{templates.go,builtin.go}` | 模板类型 + 内置模板（如 `sub2api-balance`） |
@@ -103,11 +105,12 @@ rm -rf data/      # 整个 SQLite + 历史
 
 - 前端没有专门的指标历史曲线图（数据已落 `data_points` 表，在 Collector History 中随 Run 展示，支持日期筛选和分页）
 - 单二进制单实例，多实例需引入分布式锁
+- 会话复用同样假设单实例：同一个 collector 不会被并发运行，但多个 collector 配了同一个 `session_key` 并并发运行时，会话以最后一次落库为准，没有跨运行协调
 - 浏览器 step 在 macOS 默认会拉本机 Chrome，远程模式通过 `BROWSER_WS_URL` 接 chrome:devtools
 
 ## 边界与禁忌
 
 - 不要把 master_key / jwt_secret 提交到 git
 - script step 内勿暴露 `os` / 文件系统，别破坏沙箱
-- 凭证 payload 在 API 层永远不返回明文；GET /credentials/:id 不解密
+- 凭证 payload 在 API 层不返回明文（唯一例外：GET /credentials/:id 为编辑回填返回解密 payload）；会话 payload（cookie 值 / 变量值等价于登录态）只加密落库，GET /sessions 只返回元信息，不要打日志
 - HTTP step 模板里如果用了 `Authorization: Bearer {{.vars.token}}` 这种敏感 header，运行日志的 snippet 已截断到 600 字符且仅记录 body / 部分输出，不会回写完整 token

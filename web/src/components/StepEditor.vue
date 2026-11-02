@@ -76,7 +76,7 @@ function setArrayItem(key: string, idx: number, item: any) {
           <el-input-number :model-value="Number(value[key] ?? s.default ?? 0)" @update:model-value="(v: any) => setField(key, v)" />
         </template>
         <template v-else-if="s.type === 'boolean'">
-          <el-switch :model-value="!!value[key]" @update:model-value="(v: any) => setField(key, v)" />
+          <el-switch :model-value="value[key] ?? s.default ?? false" @update:model-value="(v: any) => setField(key, v)" />
         </template>
         <template v-else-if="s.type === 'text' || s.type === 'code'">
           <div class="field-row">
