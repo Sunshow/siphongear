@@ -52,6 +52,7 @@ func Migrate(db *gorm.DB) error {
 		&models.NotificationLog{},
 		&models.RuleNotificationState{},
 		&models.APIKey{},
+		&models.Session{},
 	)
 }
 
@@ -78,6 +79,8 @@ func PruneOrphans(db *gorm.DB) error {
 			SELECT id FROM threshold_rules WHERE deleted_at IS NULL)`,
 		`DELETE FROM notification_logs WHERE channel_id NOT IN (
 			SELECT id FROM notification_channels WHERE deleted_at IS NULL)`,
+		`DELETE FROM sessions WHERE collector_id NOT IN (
+			SELECT id FROM collectors WHERE deleted_at IS NULL)`,
 	}
 	for _, s := range stmts {
 		if err := db.Exec(s).Error; err != nil {

@@ -385,6 +385,14 @@ func (s *Server) deleteCollector(c *gin.Context) {
 			_ = s.Scheduler.Reload()
 		}
 	}
+	if s.Sessions != nil {
+		// Sessions hold login secrets for the deleted collector; drop them now
+		// instead of waiting for the startup orphan prune.
+		if _, err := s.Sessions.DeleteByCollector(c.Request.Context(), id); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	if s.CollectorCleaner != nil {
 		s.CollectorCleaner.Enqueue(id)
 	}

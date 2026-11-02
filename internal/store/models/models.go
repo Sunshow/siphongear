@@ -100,6 +100,25 @@ type DataPoint struct {
 	Ts          time.Time `gorm:"index:idx_dp_collector_indicator_ts,priority:3" json:"ts"`
 }
 
+// Session persists reusable login state (cookies, selected vars and the user
+// agent) for a collector. Payload is AES-GCM encrypted; values are never
+// returned by the API. The runner reuses the row across scheduled runs so a
+// password-login site does not see a brand-new device on every run.
+type Session struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	SessionKey  string     `gorm:"column:session_key;uniqueIndex;size:191" json:"key"`
+	CollectorID uint       `gorm:"index" json:"collector_id"`
+	Payload     string     `gorm:"type:text" json:"-"`
+	CookieCount int        `json:"cookie_count"`
+	VarKeys     string     `gorm:"size:255" json:"var_keys"`
+	LoginCount  int        `json:"login_count"`
+	LastLoginAt *time.Time `json:"last_login_at"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
 type CollectorTemplate struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	Name        string         `gorm:"uniqueIndex;size:128" json:"name"`

@@ -7,5 +7,6 @@ import (
 	_ "github.com/sunshow/siphongear/internal/steps/input"
 	_ "github.com/sunshow/siphongear/internal/steps/parse"
 	_ "github.com/sunshow/siphongear/internal/steps/script"
+	_ "github.com/sunshow/siphongear/internal/steps/session"
 	_ "github.com/sunshow/siphongear/internal/steps/transform"
 )

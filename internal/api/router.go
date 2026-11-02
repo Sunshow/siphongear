@@ -14,6 +14,7 @@ import (
 	"github.com/sunshow/siphongear/internal/notify"
 	"github.com/sunshow/siphongear/internal/runner"
 	"github.com/sunshow/siphongear/internal/scheduler"
+	"github.com/sunshow/siphongear/internal/session"
 	"github.com/sunshow/siphongear/internal/templates"
 )
 
@@ -26,6 +27,7 @@ type Server struct {
 	JWT              *auth.JWT
 	Cipher           *crypto.Cipher
 	Runner           *runner.Runner
+	Sessions         *session.Manager
 	Scheduler        *scheduler.Scheduler
 	TplStore         *templates.Store
 	NotifyDispatcher *notify.Dispatcher
@@ -79,6 +81,10 @@ func NewRouter(s *Server) *gin.Engine {
 	authed.POST("/collectors/:id/dryrun", s.dryRunCollector)
 	authed.GET("/collectors/:id/runs", s.listRuns)
 	authed.GET("/collectors/:id/datapoints", s.listDataPoints)
+	authed.DELETE("/collectors/:id/sessions", s.clearCollectorSessions)
+
+	authed.GET("/sessions", s.listSessions)
+	authed.DELETE("/sessions/:id", s.deleteSession)
 
 	authed.GET("/collectors/:id/indicators", s.listIndicators)
 	authed.POST("/collectors/:id/indicators", s.createIndicator)
